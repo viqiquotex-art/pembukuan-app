@@ -23,7 +23,7 @@ const EXPENSE_CATEGORIES = [
 ];
 
 // Cloud API configuration
-const API_BASE_URL = 'https://pembukuan-api.your-domain.workers.dev';
+const API_BASE_URL = 'https://pembukuan-app.viqiquotex.workers.dev';
 
 // ==========================================
 // LOCALSTORAGE MANAGEMENT
