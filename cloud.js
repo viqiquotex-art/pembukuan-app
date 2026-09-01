@@ -1,36 +1,53 @@
 // ==========================================
 // PEMBUKUAN APP - CLOUD SYNC
 // ==========================================
-// Cloudflare Worker API Integration
-// ==========================================
 
-// ==========================================
-// CONFIGURATION
-// ==========================================
-
-const API_BASE_URL = 'https://pembukuan-app.viqiquotex.workers.dev';
+const API_BASE_URL = 'ISI_URL_WORKER_KAMU_DI_SINI';
 
 const API_ENDPOINTS = {
   register: `${API_BASE_URL}/api/auth/register`,
   login: `${API_BASE_URL}/api/auth/login`,
   saveTransactions: `${API_BASE_URL}/api/transactions`,
-  getTransactions: (userId) =>
-    `${API_BASE_URL}/api/transactions/${userId}`,
-  deleteTransaction: (userId, transactionId) =>
-    `${API_BASE_URL}/api/transactions/${userId}/${transactionId}`,
-  getStats: (userId) =>
-    `${API_BASE_URL}/api/stats/${userId}`,
-  export: (userId) =>
-    `${API_BASE_URL}/api/export/${userId}`,
+  getTransactions: (userId) => `${API_BASE_URL}/api/transactions/${userId}`,
+  getStats: (userId) => `${API_BASE_URL}/api/stats/${userId}`,
+  export: (userId) => `${API_BASE_URL}/api/export/${userId}`,
 };
 
 // ==========================================
-// LOCALSTORAGE MANAGEMENT
+// LOCAL STORAGE
 // ==========================================
 
 function getCloudCredentials() {
   const credentials = localStorage.getItem('cloud_credentials');
-  return credentials ? JSON.parse(credentials) : null;
+
+  if (credentials) {
+    return JSON.parse(credentials);
+  }
+
+  // Support format lama
+  const userId = localStorage.getItem('cloud_userId');
+  const token = localStorage.getItem('cloud_token');
+  const email = localStorage.getItem('cloud_email');
+  const name = localStorage.getItem('cloud_name');
+
+  if (userId && token) {
+    const credentials = {
+      userId,
+      token,
+      email,
+      name
+    };
+
+    // Simpan juga ke format baru
+    localStorage.setItem(
+      'cloud_credentials',
+      JSON.stringify(credentials)
+    );
+
+    return credentials;
+  }
+
+  return null;
 }
 
 function saveCloudCredentials(credentials) {
@@ -38,10 +55,20 @@ function saveCloudCredentials(credentials) {
     'cloud_credentials',
     JSON.stringify(credentials)
   );
+
+  // Simpan juga format lama supaya kompatibel
+  localStorage.setItem('cloud_userId', credentials.userId);
+  localStorage.setItem('cloud_token', credentials.token);
+  localStorage.setItem('cloud_email', credentials.email);
+  localStorage.setItem('cloud_name', credentials.name);
 }
 
 function clearCloudCredentials() {
   localStorage.removeItem('cloud_credentials');
+  localStorage.removeItem('cloud_userId');
+  localStorage.removeItem('cloud_token');
+  localStorage.removeItem('cloud_email');
+  localStorage.removeItem('cloud_name');
 }
 
 function isCloudConnected() {
@@ -49,15 +76,19 @@ function isCloudConnected() {
 }
 
 // ==========================================
-// AUTH HANDLERS
+// AUTH
 // ==========================================
 
-async function handleRegister() {
+async function handleRegister(event) {
+  event.preventDefault();
+
   const name = document.getElementById('registerName').value.trim();
   const email = document.getElementById('registerEmail').value.trim();
   const password = document.getElementById('registerPassword').value;
+  const passwordConfirm =
+    document.getElementById('registerPasswordConfirm').value;
 
-  if (!name || !email || !password) {
+  if (!name || !email || !password || !passwordConfirm) {
     showError('Semua field harus diisi');
     return;
   }
@@ -67,24 +98,24 @@ async function handleRegister() {
     return;
   }
 
-  if (!isValidEmail(email)) {
-    showError('Email tidak valid');
+  if (password !== passwordConfirm) {
+    showError('Password tidak cocok');
     return;
   }
 
   try {
-    setLoading(true);
+    setLoading(true, 'Mendaftarkan...');
 
     const response = await fetch(API_ENDPOINTS.register, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         name,
         email,
-        password,
-      }),
+        password
+      })
     });
 
     const data = await response.json();
@@ -98,23 +129,26 @@ async function handleRegister() {
       userId: data.userId,
       token: data.token,
       name: data.name,
-      email: data.email,
+      email: data.email
     });
 
     showSuccess('✅ Registrasi berhasil!');
 
     setTimeout(() => {
-      showDashboard();
-    }, 1000);
+      window.location.href = 'index.html';
+    }, 1200);
 
   } catch (error) {
+    console.error(error);
     showError(`Registrasi gagal: ${error.message}`);
   } finally {
     setLoading(false);
   }
 }
 
-async function handleLogin() {
+async function handleLogin(event) {
+  event.preventDefault();
+
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
 
@@ -124,17 +158,17 @@ async function handleLogin() {
   }
 
   try {
-    setLoading(true);
+    setLoading(true, 'Sedang login...');
 
     const response = await fetch(API_ENDPOINTS.login, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         email,
-        password,
-      }),
+        password
+      })
     });
 
     const data = await response.json();
@@ -148,16 +182,17 @@ async function handleLogin() {
       userId: data.userId,
       token: data.token,
       name: data.name,
-      email: data.email,
+      email: data.email
     });
 
     showSuccess(`✅ Login berhasil! Halo ${data.name}`);
 
     setTimeout(() => {
-      showDashboard();
-    }, 1000);
+      window.location.href = 'index.html';
+    }, 1200);
 
   } catch (error) {
+    console.error(error);
     showError(`Login gagal: ${error.message}`);
   } finally {
     setLoading(false);
@@ -165,16 +200,14 @@ async function handleLogin() {
 }
 
 function handleLogout() {
-  if (!confirm('Yakin logout? Data lokal Anda tetap aman.')) {
-    return;
+  if (confirm('Yakin logout? Data lokal tetap aman.')) {
+    clearCloudCredentials();
+    location.reload();
   }
-
-  clearCloudCredentials();
-  location.reload();
 }
 
 // ==========================================
-// CLOUD SYNC
+// SYNC TO CLOUD
 // ==========================================
 
 async function syncToCloud() {
@@ -186,11 +219,10 @@ async function syncToCloud() {
   }
 
   try {
-    setLoading(true);
+    setLoading(true, 'Syncing ke cloud...');
 
-    const transactions = JSON.parse(
-      localStorage.getItem('transactions') || '[]'
-    );
+    const transactions =
+      JSON.parse(localStorage.getItem('transactions') || '[]');
 
     const response = await fetch(
       API_ENDPOINTS.saveTransactions,
@@ -198,13 +230,13 @@ async function syncToCloud() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${credentials.token}`,
+          'Authorization': `Bearer ${credentials.token}`
         },
         body: JSON.stringify({
           userId: credentials.userId,
           token: credentials.token,
-          transactions,
-        }),
+          transactions
+        })
       }
     );
 
@@ -216,12 +248,13 @@ async function syncToCloud() {
     }
 
     showSuccess(
-      `✅ ${data.count} transaksi tersimpan di cloud`
+      `✅ Synced! ${data.count} transaksi tersimpan di cloud`
     );
 
-    await loadStats();
+    loadStats();
 
   } catch (error) {
+    console.error(error);
     showError(`Sync gagal: ${error.message}`);
   } finally {
     setLoading(false);
@@ -241,7 +274,7 @@ async function loadFromCloud() {
   }
 
   try {
-    setLoading(true);
+    setLoading(true, 'Memuat dari cloud...');
 
     const response = await fetch(
       API_ENDPOINTS.getTransactions(credentials.userId),
@@ -249,22 +282,30 @@ async function loadFromCloud() {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${credentials.token}`,
-        },
+
+          // INI YANG SEBELUMNYA HILANG
+          'Authorization': `Bearer ${credentials.token}`
+        }
       }
     );
 
     const data = await response.json();
+
+    console.log('Cloud response:', data);
 
     if (!response.ok) {
       showError(data.error || 'Load gagal');
       return;
     }
 
-    if (Array.isArray(data.transactions)) {
-      const localTransactions = JSON.parse(
-        localStorage.getItem('transactions') || '[]'
-      );
+    if (
+      Array.isArray(data.transactions) &&
+      data.transactions.length > 0
+    ) {
+      const localTransactions =
+        JSON.parse(
+          localStorage.getItem('transactions') || '[]'
+        );
 
       const merged = mergeTransactions(
         localTransactions,
@@ -277,10 +318,10 @@ async function loadFromCloud() {
       );
 
       showSuccess(
-        `✅ ${merged.length} transaksi tersedia`
+        `✅ Loaded! ${merged.length} transaksi`
       );
 
-      // Refresh main app if available
+      // Refresh halaman utama jika fungsi tersedia
       if (typeof renderHistory === 'function') {
         renderHistory();
       }
@@ -290,12 +331,13 @@ async function loadFromCloud() {
       }
 
     } else {
-      showSuccess('✅ Tidak ada transaksi di cloud');
+      showSuccess('☁️ Cloud masih kosong');
     }
 
-    await loadStats();
+    loadStats();
 
   } catch (error) {
+    console.error('Load cloud error:', error);
     showError(`Load gagal: ${error.message}`);
   } finally {
     setLoading(false);
@@ -303,15 +345,13 @@ async function loadFromCloud() {
 }
 
 // ==========================================
-// LOAD CLOUD STATS
+// STATS
 // ==========================================
 
 async function loadStats() {
   const credentials = getCloudCredentials();
 
-  if (!credentials) {
-    return;
-  }
+  if (!credentials) return;
 
   try {
     const response = await fetch(
@@ -320,28 +360,36 @@ async function loadStats() {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${credentials.token}`,
-        },
+          'Authorization': `Bearer ${credentials.token}`
+        }
       }
     );
 
     const data = await response.json();
+
+    console.log('Stats response:', data);
 
     if (!response.ok) {
       console.error('Stats error:', data);
       return;
     }
 
-    // Worker response:
+    // Worker mengirim:
     // {
     //   success: true,
     //   userId: "...",
-    //   stats: {...}
+    //   stats: {
+    //      totalIncome,
+    //      totalExpense,
+    //      balance,
+    //      transactionCount
+    //   }
     // }
 
     const stats = data.stats;
 
     if (!stats) {
+      console.error('Stats object tidak ditemukan');
       return;
     }
 
@@ -350,7 +398,7 @@ async function loadStats() {
       document.getElementById('statsContainer');
 
     if (userName) {
-      userName.textContent = credentials.name;
+      userName.textContent = credentials.name || '';
     }
 
     if (statsContainer) {
@@ -386,122 +434,108 @@ async function loadStats() {
     }
 
   } catch (error) {
-    console.error(
-      'Failed to load stats:',
-      error
-    );
+    console.error('Failed to load stats:', error);
   }
 }
 
 // ==========================================
-// UI HANDLERS
+// UI
 // ==========================================
 
-function toggleAuthForm() {
-  document
-    .getElementById('loginForm')
-    .classList.toggle('hidden');
+function toggleForm() {
+  const loginForm =
+    document.getElementById('loginForm');
 
-  document
-    .getElementById('registerForm')
-    .classList.toggle('hidden');
-}
+  const registerForm =
+    document.getElementById('registerForm');
 
-function showDashboard() {
-  const authSection =
-    document.getElementById('authSection');
+  if (!loginForm || !registerForm) return;
 
-  const dashboard =
-    document.getElementById('dashboard');
+  const loginVisible =
+    loginForm.style.display !== 'none';
 
-  if (authSection) {
-    authSection.style.display = 'none';
-  }
+  loginForm.style.display =
+    loginVisible ? 'none' : 'block';
 
-  if (dashboard) {
-    dashboard.classList.add('show');
-  }
+  registerForm.style.display =
+    loginVisible ? 'block' : 'none';
 
-  loadStats();
-}
-
-function showAuth() {
-  const authSection =
-    document.getElementById('authSection');
-
-  const dashboard =
-    document.getElementById('dashboard');
-
-  if (authSection) {
-    authSection.style.display = 'block';
-  }
-
-  if (dashboard) {
-    dashboard.classList.remove('show');
-  }
+  hideAlert();
 }
 
 function showError(message) {
-  const errorEl =
-    document.getElementById('errorMsg');
+  const alert =
+    document.getElementById('alert');
 
-  if (!errorEl) {
-    alert(message);
+  if (!alert) {
+    console.error(message);
     return;
   }
 
-  errorEl.textContent = message;
-  errorEl.style.display = 'block';
-
-  setTimeout(() => {
-    errorEl.style.display = 'none';
-  }, 4000);
+  alert.className = 'alert error show';
+  alert.textContent = message;
 }
 
 function showSuccess(message) {
-  const successEl =
-    document.getElementById('successMsg');
+  const alert =
+    document.getElementById('alert');
 
-  if (!successEl) {
-    alert(message);
+  if (!alert) {
+    console.log(message);
     return;
   }
 
-  successEl.textContent = message;
-  successEl.style.display = 'block';
+  alert.className = 'alert success show';
+  alert.textContent = message;
+}
 
-  setTimeout(() => {
-    successEl.style.display = 'none';
-  }, 4000);
+function hideAlert() {
+  const alert =
+    document.getElementById('alert');
+
+  if (alert) {
+    alert.classList.remove('show');
+  }
 }
 
 function setLoading(isLoading) {
-  const buttons =
-    document.querySelectorAll(
-      '.btn-primary, .btn-secondary'
-    );
+  const loginBtn =
+    document.getElementById('loginBtn');
 
-  buttons.forEach(btn => {
-    btn.disabled = isLoading;
+  const registerBtn =
+    document.getElementById('registerBtn');
 
-    if (isLoading) {
-      btn.classList.add('loading');
-    } else {
-      btn.classList.remove('loading');
-    }
-  });
+  const loginLoading =
+    document.getElementById('loginLoading');
+
+  const registerLoading =
+    document.getElementById('registerLoading');
+
+  if (loginBtn) {
+    loginBtn.disabled = isLoading;
+  }
+
+  if (registerBtn) {
+    registerBtn.disabled = isLoading;
+  }
+
+  if (loginLoading) {
+    loginLoading.style.display =
+      isLoading ? 'block' : 'none';
+  }
+
+  if (registerLoading) {
+    registerLoading.style.display =
+      isLoading ? 'block' : 'none';
+  }
 }
-
-// ==========================================
-// NAVIGATION
-// ==========================================
 
 function goToApp() {
   window.location.href = './index.html';
 }
 
 // ==========================================
-// UTILITY
+// UTILITIES
 // ==========================================
 
 function formatRupiah(amount) {
@@ -509,15 +543,8 @@ function formatRupiah(amount) {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount || 0);
-}
-
-function isValidEmail(email) {
-  const emailRegex =
-    /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  return emailRegex.test(email);
+    maximumFractionDigits: 0
+  }).format(Number(amount) || 0);
 }
 
 function mergeTransactions(local, cloud) {
@@ -541,33 +568,8 @@ function mergeTransactions(local, cloud) {
 // INIT
 // ==========================================
 
-window.addEventListener(
-  'DOMContentLoaded',
-  () => {
-
-    if (isCloudConnected()) {
-      showDashboard();
-    } else {
-      showAuth();
-    }
-
-    const style =
-      document.createElement('style');
-
-    style.textContent = `
-      @keyframes slideIn {
-        from {
-          opacity: 0;
-          transform: translateY(-10px);
-        }
-
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-    `;
-
-    document.head.appendChild(style);
+window.addEventListener('DOMContentLoaded', () => {
+  if (isCloudConnected()) {
+    loadStats();
   }
-);
+});
