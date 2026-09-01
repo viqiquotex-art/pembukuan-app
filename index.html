@@ -3,243 +3,398 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <meta name="theme-color" content="#f1f2f4">
+  <meta name="description" content="Aplikasi pembukuan keuangan sederhana dan modern">
+
   <title>Pembukuan App</title>
-  <!-- Main UI -->
+
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
-  <div class="container">
-<!-- =====================================================
-     APP HEADER
-     ===================================================== -->
-<header class="header">
-  <div class="header-left">
-    <h1>📊 Pembukuan Keuangan</h1>
-    <p>Kelola pemasukan dan pengeluaran dengan mudah</p>
-  </div>
-  <div class="header-right">
-    <div id="cloudStatusBadge" class="cloud-status">
-      ⚫ Offline
-    </div>
-  </div>
-</header>
-<!-- =====================================================
-     APP NAVIGATION
-     ===================================================== -->
-<nav class="tabs">
-  <button
-    class="tab-btn active"
-    onclick="switchTab('input')"
-    type="button"
-  >
-    ➕ Input Transaksi
-  </button>
-  <button
-    class="tab-btn"
-    onclick="switchTab('history')"
-    type="button"
-  >
-    📋 Riwayat
-  </button>
-  <button
-    class="tab-btn"
-    onclick="switchTab('recap')"
-    type="button"
-  >
-    📈 Rekap Bulanan
-  </button>
-  <button
-    class="tab-btn"
-    onclick="switchTab('cloud')"
-    type="button"
-  >
-    ☁️ Cloud Storage
-  </button>
-</nav>
-<!-- =====================================================
-     TAB 1 — INPUT TRANSAKSI
-     ===================================================== -->
-<main>
-  <section
-    id="input"
-    class="tab-content active"
-  >
-    <!-- EDIT MODE -->
-    <div
-      id="editModeBanner"
-      class="edit-mode-banner"
-      style="display: none;"
-    >
-      <p>
-        ✏️ Mode edit aktif — ubah data transaksi lalu simpan.
-      </p>
+
+  <div class="app-shell">
+
+    <!-- ================= HEADER ================= -->
+    <header class="app-header">
+
+      <div class="brand">
+
+        <div class="brand-icon">
+          💰
+        </div>
+
+        <div class="brand-text">
+          <h1>Pembukuan</h1>
+          <p>Kelola keuanganmu dengan mudah</p>
+        </div>
+
+      </div>
+
+      <div class="header-right">
+
+        <div id="cloudStatusBadge" class="cloud-status">
+          <span class="status-dot"></span>
+          <span>Offline</span>
+        </div>
+
+      </div>
+
+    </header>
+
+
+    <!-- ================= NAVIGATION ================= -->
+
+    <nav class="app-nav">
+
       <button
-        class="btn btn-small"
-        onclick="cancelEdit()"
-        type="button"
-        style="background: var(--muted); color: white;"
+        class="tab-btn active"
+        onclick="switchTab('input')"
       >
-        Batal
+        <span class="tab-icon">＋</span>
+        <span>Transaksi</span>
       </button>
-    </div>
-    <!-- FORM -->
-    <div class="form-section">
-      <h2 id="formTitle">
-        Tambah Transaksi Baru
-      </h2>
-      <!-- TYPE + CATEGORY -->
-      <div class="form-row">
-        <div class="form-group">
-          <label for="type">
-            Tipe Transaksi
-          </label>
-          <select
-            id="type"
-            onchange="updateCategories()"
-          >
-            <option value="income">
-              Pemasukan 💰
-            </option>
-            <option value="expense">
-              Pengeluaran 💸
-            </option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="category">
-            Kategori
-          </label>
-          <select id="category"></select>
-        </div>
-      </div>
-      <!-- AMOUNT + DATE -->
-      <div class="form-row">
-        <div class="form-group">
-          <label for="amount">
-            Jumlah (Rp)
-          </label>
-          <input
-            type="number"
-            id="amount"
-            placeholder="0"
-            min="0"
-            step="1000"
-          >
-        </div>
-        <div class="form-group">
-          <label for="date">
-            Tanggal
-          </label>
-          <input
-            type="date"
-            id="date"
-          >
-        </div>
-      </div>
-      <!-- DESCRIPTION -->
-      <div class="form-group">
-        <label for="description">
-          Keterangan
-        </label>
-        <textarea
-          id="description"
-          placeholder="Tuliskan detail transaksi..."
-        ></textarea>
-      </div>
-      <!-- ACTION -->
-      <div
-        style="
-          display: flex;
-          gap: 10px;
-          margin-top: 20px;
-        "
+
+      <button
+        class="tab-btn"
+        onclick="switchTab('history')"
       >
-        <button
-          class="btn btn-primary"
-          id="submitBtn"
-          onclick="addTransaction()"
-          type="button"
-          style="flex: 1; padding: 14px;"
+        <span class="tab-icon">☷</span>
+        <span>Riwayat</span>
+      </button>
+
+      <button
+        class="tab-btn"
+        onclick="switchTab('recap')"
+      >
+        <span class="tab-icon">⌁</span>
+        <span>Rekap</span>
+      </button>
+
+      <button
+        class="tab-btn"
+        onclick="switchTab('cloud')"
+      >
+        <span class="tab-icon">☁</span>
+        <span>Cloud</span>
+      </button>
+
+    </nav>
+
+
+    <!-- ================= MAIN ================= -->
+
+    <main class="app-main">
+
+      <!-- ================= INPUT ================= -->
+
+      <section
+        id="input"
+        class="tab-content active"
+      >
+
+        <div
+          id="editModeBanner"
+          class="edit-mode-banner"
+          style="display:none;"
         >
-          Simpan Transaksi
-        </button>
-        <button
-          class="btn"
-          id="cancelBtn"
-          onclick="cancelEdit()"
-          type="button"
-          style="
-            flex: 1;
-            padding: 14px;
-            background: var(--border);
-            color: var(--text);
-            display: none;
-          "
-        >
-          Batal Edit
-        </button>
-      </div>
-    </div>
-  </section>
-  <!-- =====================================================
-       TAB 2 — RIWAYAT
-       ===================================================== -->
-  <section
-    id="history"
-    class="tab-content"
-  >
-    <!-- TODAY -->
-    <div style="margin-bottom: 20px;">
-      <h2 style="margin-bottom: 20px;">
-        Ringkasan Hari Ini
-      </h2>
-      <div
-        class="stats-grid"
-        id="todayStats"
-      ></div>
-    </div>
-    <!-- TRANSACTION HISTORY -->
-    <div>
-      <h2 style="margin-bottom: 20px;">
-        Transaksi Terbaru
-      </h2>
-      <div
-        id="transactionList"
-        class="transaction-list"
-      ></div>
-    </div>
-  </section>
-  <!-- =====================================================
-       TAB 3 — REKAP BULANAN
-       ===================================================== -->
-  <section
-    id="recap"
-    class="tab-content"
-  >
-    <div style="margin-bottom: 20px;">
-      <h2 style="margin-bottom: 20px;">
-        Rekap Bulanan
-      </h2>
-      <div
-        id="recapGrid"
-        class="recap-grid"
-      ></div>
-    </div>
-  </section>
-  <!-- =====================================================
-       TAB 4 — CLOUD STORAGE
-       ===================================================== -->
-  <section
-    id="cloud"
-    class="tab-content"
-  >
-    <div id="cloudPanel"></div>
-  </section>
-</main>
+
+          <div>
+            <strong>Mode Edit</strong>
+            <p>Silakan ubah data transaksi.</p>
+          </div>
+
+          <button
+            class="btn btn-secondary btn-small"
+            onclick="cancelEdit()"
+          >
+            Batal
+          </button>
+
+        </div>
+
+
+        <div class="page-heading">
+
+          <div>
+            <span class="eyebrow">KEUANGAN</span>
+
+            <h2 id="formTitle">
+              Tambah Transaksi
+            </h2>
+
+            <p>
+              Catat pemasukan atau pengeluaranmu.
+            </p>
+          </div>
+
+        </div>
+
+
+        <div class="form-section">
+
+          <!-- TRANSACTION TYPE -->
+
+          <div class="transaction-type">
+
+            <label>Tipe Transaksi</label>
+
+            <div class="type-selector">
+
+              <select
+                id="type"
+                onchange="updateCategories()"
+              >
+
+                <option value="income">
+                  Pemasukan 💰
+                </option>
+
+                <option value="expense">
+                  Pengeluaran 💸
+                </option>
+
+              </select>
+
+            </div>
+
+          </div>
+
+
+          <!-- FORM -->
+
+          <div class="form-grid">
+
+            <div class="form-group">
+
+              <label for="category">
+                Kategori
+              </label>
+
+              <select id="category"></select>
+
+            </div>
+
+
+            <div class="form-group">
+
+              <label for="amount">
+                Jumlah
+              </label>
+
+              <div class="money-input">
+
+                <span>Rp</span>
+
+                <input
+                  type="number"
+                  id="amount"
+                  placeholder="0"
+                  min="0"
+                  step="1000"
+                >
+
+              </div>
+
+            </div>
+
+
+            <div class="form-group">
+
+              <label for="date">
+                Tanggal
+              </label>
+
+              <input
+                type="date"
+                id="date"
+              >
+
+            </div>
+
+
+            <div class="form-group form-full">
+
+              <label for="description">
+                Keterangan
+              </label>
+
+              <textarea
+                id="description"
+                placeholder="Contoh: Belanja kebutuhan kantor..."
+              ></textarea>
+
+            </div>
+
+          </div>
+
+
+          <!-- BUTTON -->
+
+          <div class="form-actions">
+
+            <button
+              class="btn btn-primary btn-save"
+              id="submitBtn"
+              onclick="addTransaction()"
+            >
+              <span>✓</span>
+              Simpan Transaksi
+            </button>
+
+            <button
+              class="btn btn-secondary"
+              id="cancelBtn"
+              onclick="cancelEdit()"
+              style="display:none;"
+            >
+              Batal
+            </button>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <!-- ================= HISTORY ================= -->
+
+      <section
+        id="history"
+        class="tab-content"
+      >
+
+        <div class="page-heading">
+
+          <div>
+            <span class="eyebrow">OVERVIEW</span>
+
+            <h2>Riwayat Transaksi</h2>
+
+            <p>
+              Pantau aktivitas keuanganmu.
+            </p>
+          </div>
+
+        </div>
+
+
+        <div class="section-title">
+          <h3>Ringkasan Hari Ini</h3>
+        </div>
+
+        <div
+          class="stats-grid"
+          id="todayStats"
+        ></div>
+
+
+        <div class="section-title transaction-title">
+
+          <h3>Transaksi Terbaru</h3>
+
+        </div>
+
+
+        <div
+          id="transactionList"
+          class="transaction-list"
+        ></div>
+
+      </section>
+
+
+      <!-- ================= RECAP ================= -->
+
+      <section
+        id="recap"
+        class="tab-content"
+      >
+
+        <div class="page-heading">
+
+          <div>
+
+            <span class="eyebrow">
+              ANALYTICS
+            </span>
+
+            <h2>Rekap Bulanan</h2>
+
+            <p>
+              Lihat perkembangan keuanganmu.
+            </p>
+
+          </div>
+
+        </div>
+
+
+        <div
+          class="recap-grid"
+          id="recapGrid"
+        ></div>
+
+      </section>
+
+
+      <!-- ================= CLOUD ================= -->
+
+      <section
+        id="cloud"
+        class="tab-content"
+      >
+
+        <div class="page-heading">
+
+          <div>
+
+            <span class="eyebrow">
+              CLOUD
+            </span>
+
+            <h2>Cloud Storage</h2>
+
+            <p>
+              Simpan dan sinkronkan data secara online.
+            </p>
+
+          </div>
+
+        </div>
+
+
+        <div id="cloudPanel"></div>
+
+      </section>
+
+    </main>
+
+
+    <!-- ================= FOOTER ================= -->
+
+    <footer class="app-footer">
+
+      <span>
+        Pembukuan App
+      </span>
+
+      <span>
+        •
+      </span>
+
+      <span>
+        Your finance, organized.
+      </span>
+
+    </footer>
+
   </div>
-  <!-- =======================================================
-       APPLICATION LOGIC
-       ======================================================= -->
+
+
   <script src="app.js"></script>
+
 </body>
 </html>
