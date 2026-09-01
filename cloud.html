@@ -10,527 +10,649 @@
             padding: 0;
             box-sizing: border-box;
         }
-
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea, #764ba2);
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             padding: 20px;
         }
-
         .container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            max-width: 450px;
             width: 100%;
+            max-width: 450px;
+            background: white;
+            border-radius: 15px;
             overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,.3);
         }
-
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px 20px;
+            padding: 35px 20px;
             text-align: center;
+            color: white;
+            background: linear-gradient(135deg, #667eea, #764ba2);
         }
-
         .header h1 {
-            font-size: 32px;
-            margin-bottom: 10px;
+            font-size: 28px;
+            margin-bottom: 8px;
         }
-
         .header p {
             font-size: 14px;
-            opacity: 0.9;
+            opacity: .9;
         }
-
         .content {
-            padding: 40px;
+            padding: 35px;
         }
-
-        .form-group {
+        h2 {
+            font-size: 20px;
             margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
             color: #333;
-            font-size: 14px;
         }
-
-        .form-group input {
+        .form-group {
+            margin-bottom: 18px;
+        }
+        label {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 14px;
+            font-weight: bold;
+            color: #333;
+        }
+        input {
             width: 100%;
-            padding: 12px;
+            padding: 13px;
             border: 2px solid #e0e0e0;
-            border-radius: 6px;
+            border-radius: 7px;
             font-size: 14px;
-            transition: border-color 0.3s;
         }
-
-        .form-group input:focus {
+        input:focus {
             outline: none;
             border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
-
-        .form-group input::placeholder {
-            color: #999;
-        }
-
         .button-group {
             display: flex;
             gap: 10px;
-            margin-top: 30px;
+            margin-top: 25px;
         }
-
         button {
             flex: 1;
-            padding: 12px;
+            padding: 13px;
             border: none;
-            border-radius: 6px;
+            border-radius: 7px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: bold;
             cursor: pointer;
-            transition: all 0.3s;
         }
-
+        button:disabled {
+            opacity: .6;
+            cursor: not-allowed;
+        }
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
+            background: linear-gradient(135deg, #667eea, #764ba2);
         }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-        }
-
-        .btn-primary:active {
-            transform: translateY(0);
-        }
-
         .btn-secondary {
-            background: #f5f5f5;
+            background: #f2f2f2;
             color: #333;
-            border: 2px solid #e0e0e0;
+            border: 1px solid #ddd;
         }
-
-        .btn-secondary:hover {
-            background: #eeeeee;
-        }
-
-        .toggle-form {
-            text-align: center;
-            margin-top: 20px;
-            color: #666;
-            font-size: 14px;
-        }
-
-        .toggle-form button {
-            background: none;
-            border: none;
-            color: #667eea;
-            cursor: pointer;
-            font-weight: 600;
-            padding: 0;
-            margin-left: 5px;
-            text-decoration: underline;
-        }
-
-        .toggle-form button:hover {
-            color: #764ba2;
-        }
-
         .alert {
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-            font-size: 14px;
             display: none;
+            padding: 12px;
+            margin-bottom: 20px;
+            border-radius: 7px;
+            font-size: 14px;
         }
-
         .alert.show {
             display: block;
         }
-
         .alert.success {
             background: #d4edda;
             color: #155724;
-            border: 1px solid #c3e6cb;
         }
-
         .alert.error {
             background: #f8d7da;
             color: #721c24;
-            border: 1px solid #f5c6cb;
         }
-
         .alert.info {
             background: #d1ecf1;
             color: #0c5460;
-            border: 1px solid #bee5eb;
         }
-
         .loading {
             display: none;
             text-align: center;
             color: #667eea;
             font-size: 14px;
+            margin: 15px 0;
         }
-
         .spinner {
             display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 3px solid #f3f3f3;
+            width: 15px;
+            height: 15px;
+            border: 3px solid #eee;
             border-top: 3px solid #667eea;
             border-radius: 50%;
             animation: spin 1s linear infinite;
-            margin-right: 8px;
+            margin-right: 7px;
+            vertical-align: middle;
         }
-
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
         }
-
-        .login-info {
-            background: #f9f9f9;
-            padding: 15px;
-            border-radius: 6px;
+        .info {
             margin-top: 20px;
+            padding: 15px;
+            background: #f7f7f7;
+            border-radius: 7px;
             font-size: 13px;
-            color: #666;
             line-height: 1.6;
+            color: #666;
         }
-
-        .login-info strong {
-            color: #333;
-        }
-
         .back-link {
             text-align: center;
             margin-top: 20px;
         }
-
         .back-link a {
             color: #667eea;
             text-decoration: none;
             font-size: 14px;
         }
-
-        .back-link a:hover {
-            text-decoration: underline;
-        }
-
-        @media (max-width: 480px) {
+        @media(max-width:480px) {
             .content {
                 padding: 25px;
-            }
-
-            .header {
-                padding: 30px 20px;
-            }
-
-            .header h1 {
-                font-size: 24px;
-            }
-
-            button {
-                font-size: 13px;
-                padding: 10px;
             }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>☁️ Cloud Storage</h1>
-            <p>Backup data Anda ke cloud</p>
-        </div>
-
-        <div class="content">
-            <!-- Alert Messages -->
-            <div id="alert" class="alert"></div>
-
-            <!-- Login Form -->
-            <form id="loginForm" onsubmit="handleLogin(event)">
-                <h2 style="margin-bottom: 20px; font-size: 18px; color: #333;">🔐 Login</h2>
-
-                <div class="form-group">
-                    <label for="loginEmail">Email</label>
-                    <input 
-                        type="email" 
-                        id="loginEmail" 
-                        placeholder="contoh@email.com"
-                        required
-                    >
-                </div>
-
-                <div class="form-group">
-                    <label for="loginPassword">Password</label>
-                    <input 
-                        type="password" 
-                        id="loginPassword" 
-                        placeholder="••••••••"
-                        required
-                    >
-                </div>
-
-                <div class="loading" id="loginLoading">
-                    <span class="spinner"></span> Logging in...
-                </div>
-
-                <div class="button-group">
-                    <button type="submit" class="btn-primary" id="loginBtn">Login</button>
-                    <button type="button" class="btn-secondary" onclick="toggleForm()">Register</button>
-                </div>
-
-                <div class="login-info">
-                    <strong>💡 Tips:</strong><br>
-                    Gunakan akun cloud Anda untuk backup & sync data antar device.
-                </div>
-            </form>
-
-            <!-- Register Form -->
-            <form id="registerForm" style="display: none;" onsubmit="handleRegister(event)">
-                <h2 style="margin-bottom: 20px; font-size: 18px; color: #333;">📝 Register</h2>
-
-                <div class="form-group">
-                    <label for="registerName">Nama Lengkap</label>
-                    <input 
-                        type="text" 
-                        id="registerName" 
-                        placeholder="Nama Anda"
-                        required
-                    >
-                </div>
-
-                <div class="form-group">
-                    <label for="registerEmail">Email</label>
-                    <input 
-                        type="email" 
-                        id="registerEmail" 
-                        placeholder="contoh@email.com"
-                        required
-                    >
-                </div>
-
-                <div class="form-group">
-                    <label for="registerPassword">Password</label>
-                    <input 
-                        type="password" 
-                        id="registerPassword" 
-                        placeholder="Minimal 6 karakter"
-                        minlength="6"
-                        required
-                    >
-                </div>
-
-                <div class="form-group">
-                    <label for="registerPasswordConfirm">Konfirmasi Password</label>
-                    <input 
-                        type="password" 
-                        id="registerPasswordConfirm" 
-                        placeholder="Ketik ulang password"
-                        required
-                    >
-                </div>
-
-                <div class="loading" id="registerLoading">
-                    <span class="spinner"></span> Registering...
-                </div>
-
-                <div class="button-group">
-                    <button type="submit" class="btn-primary" id="registerBtn">Register</button>
-                    <button type="button" class="btn-secondary" onclick="toggleForm()">Login</button>
-                </div>
-
-                <div class="login-info">
-                    <strong>✨ Keuntungan:</strong><br>
-                    • Backup otomatis<br>
-                    • Akses dari mana saja<br>
-                    • Data aman & terenkripsi
-                </div>
-            </form>
-
-            <div class="back-link">
-                <a href="index.html">← Kembali ke Aplikasi</a>
+<div class="container">
+    <div class="header">
+        <h1>☁️ Cloud Storage</h1>
+        <p>Backup data Pembukuan Anda ke cloud</p>
+    </div>
+    <div class="content">
+        <div id="alert" class="alert"></div>
+        <!-- LOGIN -->
+        <form id="loginForm">
+            <h2>🔐 Login</h2>
+            <div class="form-group">
+                <label>Email</label>
+                <input
+                    type="email"
+                    id="loginEmail"
+                    placeholder="contoh@email.com"
+                    required
+                >
             </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input
+                    type="password"
+                    id="loginPassword"
+                    placeholder="Password"
+                    required
+                >
+            </div>
+            <div id="loginLoading" class="loading">
+                <span class="spinner"></span>
+                Menghubungkan ke cloud...
+            </div>
+            <div class="button-group">
+                <button
+                    type="submit"
+                    class="btn-primary"
+                    id="loginBtn"
+                >
+                    Login
+                </button>
+                <button
+                    type="button"
+                    class="btn-secondary"
+                    onclick="toggleForm()"
+                >
+                    Register
+                </button>
+            </div>
+            <div class="info">
+                💡 Login digunakan untuk menyimpan dan
+                mengambil data pembukuan Anda dari cloud.
+            </div>
+        </form>
+        <!-- REGISTER -->
+        <form
+            id="registerForm"
+            style="display:none;"
+        >
+            <h2>📝 Register</h2>
+            <div class="form-group">
+                <label>Nama Lengkap</label>
+                <input
+                    type="text"
+                    id="registerName"
+                    placeholder="Nama Anda"
+                    required
+                >
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input
+                    type="email"
+                    id="registerEmail"
+                    placeholder="contoh@email.com"
+                    required
+                >
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input
+                    type="password"
+                    id="registerPassword"
+                    placeholder="Minimal 6 karakter"
+                    minlength="6"
+                    required
+                >
+            </div>
+            <div class="form-group">
+                <label>Konfirmasi Password</label>
+                <input
+                    type="password"
+                    id="registerPasswordConfirm"
+                    placeholder="Ketik ulang password"
+                    required
+                >
+            </div>
+            <div id="registerLoading" class="loading">
+                <span class="spinner"></span>
+                Membuat akun...
+            </div>
+            <div class="button-group">
+                <button
+                    type="submit"
+                    class="btn-primary"
+                    id="registerBtn"
+                >
+                    Register
+                </button>
+                <button
+                    type="button"
+                    class="btn-secondary"
+                    onclick="toggleForm()"
+                >
+                    Login
+                </button>
+            </div>
+            <div class="info">
+                ✨ Dengan akun cloud Anda dapat:
+                <br>
+                • Backup data
+                <br>
+                • Sinkronisasi antar perangkat
+                <br>
+                • Mengakses data kapan saja
+            </div>
+        </form>
+        <div class="back-link">
+            <a href="./index.html">
+                ← Kembali ke Aplikasi
+            </a>
         </div>
     </div>
-
-    <script>
-        // Get API base URL from localStorage or use default
-        const API_BASE_URL = localStorage.getItem('apiBaseUrl') || 'https://pembukuan-app.viqiquotex.workers.dev';
-
-        function toggleForm() {
-            const loginForm = document.getElementById('loginForm');
-            const registerForm = document.getElementById('registerForm');
-            
-            loginForm.style.display = loginForm.style.display === 'none' ? 'block' : 'none';
-            registerForm.style.display = registerForm.style.display === 'none' ? 'block' : 'none';
-            
-            // Clear alert
+</div>
+<script>
+/* ==================================================
+   CLOUDFLARE WORKER
+   ================================================== */
+const API_BASE_URL =
+    'https://pembukuan-app.viqiquotex.workers.dev';
+/* ==================================================
+   ENDPOINT
+   ================================================== */
+const API = {
+    register:
+        `${API_BASE_URL}/api/auth/register`,
+    login:
+        `${API_BASE_URL}/api/auth/login`
+};
+/* ==================================================
+   ALERT
+   ================================================== */
+function showAlert(message, type = 'info') {
+    const alert =
+        document.getElementById('alert');
+    alert.className =
+        `alert ${type} show`;
+    alert.textContent =
+        message;
+}
+function hideAlert() {
+    const alert =
+        document.getElementById('alert');
+    alert.classList.remove('show');
+}
+/* ==================================================
+   TOGGLE LOGIN / REGISTER
+   ================================================== */
+function toggleForm() {
+    const loginForm =
+        document.getElementById('loginForm');
+    const registerForm =
+        document.getElementById('registerForm');
+    hideAlert();
+    if (
+        registerForm.style.display === 'none'
+    ) {
+        loginForm.style.display = 'none';
+        registerForm.style.display = 'block';
+    } else {
+        loginForm.style.display = 'block';
+        registerForm.style.display = 'none';
+    }
+}
+/* ==================================================
+   LOADING
+   ================================================== */
+function setLoading(type, loading) {
+    if (type === 'login') {
+        document.getElementById('loginBtn')
+            .disabled = loading;
+        document.getElementById('loginLoading')
+            .style.display =
+            loading ? 'block' : 'none';
+    }
+    if (type === 'register') {
+        document.getElementById('registerBtn')
+            .disabled = loading;
+        document.getElementById('registerLoading')
+            .style.display =
+            loading ? 'block' : 'none';
+    }
+}
+/* ==================================================
+   SAVE LOGIN
+   ================================================== */
+function saveCredentials(data) {
+    const credentials = {
+        userId: data.userId,
+        token: data.token,
+        email: data.email,
+        name: data.name
+    };
+    localStorage.setItem(
+        'cloud_credentials',
+        JSON.stringify(credentials)
+    );
+    localStorage.setItem(
+        'cloud_userId',
+        data.userId
+    );
+    localStorage.setItem(
+        'cloud_token',
+        data.token
+    );
+    localStorage.setItem(
+        'cloud_email',
+        data.email
+    );
+    localStorage.setItem(
+        'cloud_name',
+        data.name
+    );
+}
+/* ==================================================
+   LOGIN
+   ================================================== */
+document
+    .getElementById('loginForm')
+    .addEventListener(
+        'submit',
+        async function(event) {
+            event.preventDefault();
             hideAlert();
-        }
-
-        function showAlert(message, type = 'info') {
-            const alert = document.getElementById('alert');
-            alert.className = `alert ${type} show`;
-            alert.textContent = message;
-            
-            // Auto hide after 5 seconds
-            setTimeout(() => hideAlert(), 5000);
-        }
-
-        function hideAlert() {
-            const alert = document.getElementById('alert');
-            alert.classList.remove('show');
-        }
-
-        async function handleLogin(event) {
-            event.preventDefault();
-
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            const loginBtn = document.getElementById('loginBtn');
-            const loginLoading = document.getElementById('loginLoading');
-
-            // Validation
+            const email =
+                document
+                    .getElementById('loginEmail')
+                    .value
+                    .trim()
+                    .toLowerCase();
+            const password =
+                document
+                    .getElementById('loginPassword')
+                    .value;
             if (!email || !password) {
-                showAlert('❌ Email dan password harus diisi!', 'error');
+                showAlert(
+                    '❌ Email dan password harus diisi.',
+                    'error'
+                );
                 return;
             }
-
+            setLoading('login', true);
             try {
-                loginBtn.disabled = true;
-                loginLoading.style.display = 'block';
-
-                const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ email, password })
-                });
-
-                const data = await response.json();
-
+                console.log(
+                    'LOGIN:',
+                    API.login
+                );
+                const response =
+                    await fetch(
+                        API.login,
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type':
+                                    'application/json'
+                            },
+                            body:
+                                JSON.stringify({
+                                    email,
+                                    password
+                                })
+                        }
+                    );
+                const data =
+                    await response.json();
+                console.log(
+                    'LOGIN RESPONSE:',
+                    data
+                );
                 if (!response.ok) {
-                    showAlert(`❌ ${data.error || 'Login gagal'}`, 'error');
+                    showAlert(
+                        `❌ ${data.error || 'Login gagal'}`,
+                        'error'
+                    );
                     return;
                 }
-
-                // Save credentials
-                localStorage.setItem('cloud_userId', data.userId);
-                localStorage.setItem('cloud_token', data.token);
-                localStorage.setItem('cloud_email', email);
-                localStorage.setItem('cloud_name', data.name);
-
-                showAlert(`✅ Login berhasil! Selamat datang, ${data.name}!`, 'success');
-
-                // Redirect after 2 seconds
-                setTimeout(() => {
-                    window.location.href = 'index.html';
-                }, 2000);
-
+                saveCredentials(data);
+                showAlert(
+                    `✅ Login berhasil! Selamat datang, ${data.name}!`,
+                    'success'
+                );
+                setTimeout(
+                    () => {
+                        window.location.href =
+                            './index.html';
+                    },
+                    1000
+                );
             } catch (error) {
-                console.error('Login error:', error);
-                showAlert(`❌ Error: ${error.message}`, 'error');
+                console.error(
+                    'LOGIN ERROR:',
+                    error
+                );
+                showAlert(
+                    `❌ Tidak dapat terhubung ke server: ${error.message}`,
+                    'error'
+                );
             } finally {
-                loginBtn.disabled = false;
-                loginLoading.style.display = 'none';
+                setLoading(
+                    'login',
+                    false
+                );
             }
         }
-
-        async function handleRegister(event) {
+    );
+/* ==================================================
+   REGISTER
+   ================================================== */
+document
+    .getElementById('registerForm')
+    .addEventListener(
+        'submit',
+        async function(event) {
             event.preventDefault();
-
-            const name = document.getElementById('registerName').value;
-            const email = document.getElementById('registerEmail').value;
-            const password = document.getElementById('registerPassword').value;
-            const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
-            const registerBtn = document.getElementById('registerBtn');
-            const registerLoading = document.getElementById('registerLoading');
-
-            // Validation
-            if (!name || !email || !password || !passwordConfirm) {
-                showAlert('❌ Semua field harus diisi!', 'error');
+            hideAlert();
+            const name =
+                document
+                    .getElementById('registerName')
+                    .value
+                    .trim();
+            const email =
+                document
+                    .getElementById('registerEmail')
+                    .value
+                    .trim()
+                    .toLowerCase();
+            const password =
+                document
+                    .getElementById('registerPassword')
+                    .value;
+            const confirmPassword =
+                document
+                    .getElementById('registerPasswordConfirm')
+                    .value;
+            if (
+                !name ||
+                !email ||
+                !password ||
+                !confirmPassword
+            ) {
+                showAlert(
+                    '❌ Semua field harus diisi.',
+                    'error'
+                );
                 return;
             }
-
             if (password.length < 6) {
-                showAlert('❌ Password minimal 6 karakter!', 'error');
+                showAlert(
+                    '❌ Password minimal 6 karakter.',
+                    'error'
+                );
                 return;
             }
-
-            if (password !== passwordConfirm) {
-                showAlert('❌ Password tidak cocok!', 'error');
+            if (
+                password !== confirmPassword
+            ) {
+                showAlert(
+                    '❌ Password tidak cocok.',
+                    'error'
+                );
                 return;
             }
-
+            setLoading(
+                'register',
+                true
+            );
             try {
-                registerBtn.disabled = true;
-                registerLoading.style.display = 'block';
-
-                const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ name, email, password })
-                });
-
-                const data = await response.json();
-
+                console.log(
+                    'REGISTER:',
+                    API.register
+                );
+                const response =
+                    await fetch(
+                        API.register,
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type':
+                                    'application/json'
+                            },
+                            body:
+                                JSON.stringify({
+                                    name,
+                                    email,
+                                    password
+                                })
+                        }
+                    );
+                const data =
+                    await response.json();
+                console.log(
+                    'REGISTER RESPONSE:',
+                    data
+                );
                 if (!response.ok) {
-                    showAlert(`❌ ${data.error || 'Register gagal'}`, 'error');
+                    showAlert(
+                        `❌ ${data.error || 'Register gagal'}`,
+                        'error'
+                    );
                     return;
                 }
-
-                // Save credentials
-                localStorage.setItem('cloud_userId', data.userId);
-                localStorage.setItem('cloud_token', data.token);
-                localStorage.setItem('cloud_email', email);
-                localStorage.setItem('cloud_name', name);
-
-                showAlert(`✅ Register berhasil! Selamat datang, ${name}!`, 'success');
-
-                // Redirect after 2 seconds
-                setTimeout(() => {
-                    window.location.href = 'index.html';
-                }, 2000);
-
+                saveCredentials(data);
+                showAlert(
+                    `✅ Register berhasil! Selamat datang, ${data.name}!`,
+                    'success'
+                );
+                setTimeout(
+                    () => {
+                        window.location.href =
+                            './index.html';
+                    },
+                    1000
+                );
             } catch (error) {
-                console.error('Register error:', error);
-                showAlert(`❌ Error: ${error.message}`, 'error');
+                console.error(
+                    'REGISTER ERROR:',
+                    error
+                );
+                showAlert(
+                    `❌ Tidak dapat terhubung ke server: ${error.message}`,
+                    'error'
+                );
             } finally {
-                registerBtn.disabled = false;
-                registerLoading.style.display = 'none';
+                setLoading(
+                    'register',
+                    false
+                );
             }
         }
-
-        // Check if already logged in
-        function checkLogin() {
-            const userId = localStorage.getItem('cloud_userId');
-            if (userId) {
-                showAlert('✅ Anda sudah login! Redirecting...', 'info');
-                setTimeout(() => {
-                    window.location.href = 'index.html';
-                }, 1500);
-            }
+    );
+/* ==================================================
+   CLEAR OLD API URL
+   ================================================== */
+localStorage.removeItem('apiBaseUrl');
+/* ==================================================
+   CHECK LOGIN
+   ================================================== */
+window.addEventListener(
+    'DOMContentLoaded',
+    () => {
+        const userId =
+            localStorage.getItem(
+                'cloud_userId'
+            );
+        const token =
+            localStorage.getItem(
+                'cloud_token'
+            );
+        if (userId && token) {
+            showAlert(
+                '✅ Anda sudah login. Mengarahkan ke aplikasi...',
+                'info'
+            );
+            setTimeout(
+                () => {
+                    window.location.href =
+                        './index.html';
+                },
+                1000
+            );
         }
-
-        // Initialize
-        window.addEventListener('load', () => {
-            checkLogin();
-        });
-    </script>
+    }
+);
+</script>
 </body>
 </html>
