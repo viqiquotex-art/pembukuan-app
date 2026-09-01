@@ -1,27 +1,20 @@
 // ==========================================
-// PEMBUKUAN APP - CLOUDFLARE WORKER
+// PEMBUKUAN API - Cloudflare Worker
+// Authentication & Authorization with Security
 // ==========================================
-// Backend untuk menyimpan & sync data ke cloud
-// Database: Cloudflare KV Store
 
 export default {
   async fetch(request, env) {
-    
-    // ==========================================
-    // CORS HEADERS
-    // ==========================================
-    
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    };
-
-    // Handle preflight requests
+    // CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
-        headers: corsHeaders,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Max-Age': '86400',
+        },
       });
     }
 
@@ -29,200 +22,267 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
-    try {
-      // ==========================================
-      // ROUTES
-      // ==========================================
+    // Add CORS headers to all responses
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Content-Type': 'application/json',
+    };
 
-      // GET /api/health - Test endpoint
+    try {
+      // Health check endpoint
       if (path === '/api/health' && method === 'GET') {
-        return jsonResponse({
-          status: 'ok',
+        return jsonResponse({ 
+          status: 'ok', 
           message: 'Pembukuan API is running ⚡',
           timestamp: new Date().toISOString()
         }, 200, corsHeaders);
       }
 
-      // POST /api/auth/register - Register user
+      // ========== AUTH ENDPOINTS ==========
+
+      // Register endpoint
       if (path === '/api/auth/register' && method === 'POST') {
-        return handleRegister(request, env, corsHeaders);
+        return await handleRegister(request, env, corsHeaders);
       }
 
-      // POST /api/auth/login - Login user
+      // Login endpoint
       if (path === '/api/auth/login' && method === 'POST') {
-        return handleLogin(request, env, corsHeaders);
+        return await handleLogin(request, env, corsHeaders);
       }
 
-      // POST /api/transactions - Save transactions
+      // Get user profile
+      if (path === '/api/auth/profile' && method === 'GET') {
+        return await handleGetProfile(request, env, corsHeaders);
+      }
+
+      // ========== TRANSACTION ENDPOINTS ==========
+
+      // Save/Update transactions
       if (path === '/api/transactions' && method === 'POST') {
-        return handleSaveTransactions(request, env, corsHeaders);
+        return await handleSaveTransactions(request, env, corsHeaders);
       }
 
-      // GET /api/transactions/:userId - Get transactions
-      if (path.startsWith('/api/transactions/') && method === 'GET') {
+      // Get user transactions
+      if (path.match(/^\/api\/transactions\/[^/]+$/) && method === 'GET') {
         const userId = path.split('/')[3];
-        return handleGetTransactions(userId, env, corsHeaders);
+        return await handleGetTransactions(userId, request, env, corsHeaders);
       }
 
-      // DELETE /api/transactions/:userId/:transactionId
-      if (path.startsWith('/api/transactions/') && method === 'DELETE') {
+      // Delete transaction
+      if (path.match(/^\/api\/transactions\/[^/]+\/[^/]+$/) && method === 'DELETE') {
         const parts = path.split('/');
         const userId = parts[3];
         const transactionId = parts[4];
-        return handleDeleteTransaction(userId, transactionId, env, corsHeaders);
+        return await handleDeleteTransaction(userId, transactionId, request, env, corsHeaders);
       }
 
-      // GET /api/stats/:userId - Get summary stats
-      if (path.startsWith('/api/stats/') && method === 'GET') {
+      // ========== STATS ENDPOINTS ==========
+
+      // Get user stats
+      if (path.match(/^\/api\/stats\/[^/]+$/) && method === 'GET') {
         const userId = path.split('/')[3];
-        return handleGetStats(userId, env, corsHeaders);
+        return await handleGetStats(userId, request, env, corsHeaders);
       }
+
+      // ========== EXPORT ENDPOINTS ==========
 
       // Export data
-      if (path === '/api/export' && method === 'POST') {
-        return handleExport(request, env, corsHeaders);
+      if (path.match(/^\/api\/export\/[^/]+$/) && method === 'GET') {
+        const userId = path.split('/')[3];
+        return await handleExport(userId, request, env, corsHeaders);
       }
 
-      // Not found
-      return jsonResponse({
-        error: 'Endpoint tidak ditemukan',
-        path: path,
-        method: method
+      // Unknown endpoint
+      return jsonResponse({ 
+        error: 'Endpoint not found' 
       }, 404, corsHeaders);
 
     } catch (error) {
-      console.error('Worker error:', error);
-      return jsonResponse({
-        error: 'Server error',
-        message: error.message
+      console.error('API Error:', error);
+      return jsonResponse({ 
+        error: 'Internal server error',
+        message: error.message 
       }, 500, corsHeaders);
     }
-  }
+  },
 };
 
 // ==========================================
-// HELPER FUNCTIONS
-// ==========================================
-
-function jsonResponse(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      ...headers,
-    },
-  });
-}
-
-// Simple JWT-like token (in production, use proper JWT)
-function generateToken(userId) {
-  return `token_${userId}_${Date.now()}`;
-}
-
-function verifyToken(token, userId) {
-  return token.startsWith(`token_${userId}`);
-}
-
-// ==========================================
-// AUTH HANDLERS
+// AUTHENTICATION HANDLERS
 // ==========================================
 
 async function handleRegister(request, env, corsHeaders) {
   try {
-    const body = await request.json();
-    const { email, password, name } = body;
+    const { email, password, name } = await request.json();
 
+    // Validation
     if (!email || !password || !name) {
-      return jsonResponse({
-        error: 'Email, password, dan name diperlukan'
+      return jsonResponse({ 
+        error: 'Missing required fields: email, password, name' 
       }, 400, corsHeaders);
     }
 
-    const userId = `user_${Date.now()}`;
-    const userKey = `user:${email}`;
-    
-    // Check if user already exists
-    const existingUser = await env.PEMBUKUAN_KV.get(userKey);
+    // Email validation
+    if (!isValidEmail(email)) {
+      return jsonResponse({ 
+        error: 'Invalid email format' 
+      }, 400, corsHeaders);
+    }
+
+    // Password validation
+    if (password.length < 6) {
+      return jsonResponse({ 
+        error: 'Password must be at least 6 characters' 
+      }, 400, corsHeaders);
+    }
+
+    const kv = env.PEMBUKUAN_KV;
+
+    // Check if user exists
+    const existingUser = await kv.get(`user:${email}`);
     if (existingUser) {
-      return jsonResponse({
-        error: 'Email sudah terdaftar'
+      return jsonResponse({ 
+        error: 'Email already registered' 
       }, 409, corsHeaders);
     }
 
-    // Save user (simple password - in production use bcrypt)
-    const userData = {
+    // Generate user ID & token
+    const userId = generateId();
+    const token = generateToken();
+    const hashedPassword = encodePassword(password);
+
+    // Create user object
+    const user = {
       userId,
       email,
       name,
-      password: btoa(password), // Simple base64 encoding
-      createdAt: new Date().toISOString()
+      password: hashedPassword,
+      token,
+      createdAt: new Date().toISOString(),
+      lastLogin: new Date().toISOString(),
     };
 
-    await env.PEMBUKUAN_KV.put(userKey, JSON.stringify(userData));
-    await env.PEMBUKUAN_KV.put(`userId:${userId}`, email);
+    // Save user
+    await kv.put(`user:${email}`, JSON.stringify(user));
+    await kv.put(`user:${userId}`, JSON.stringify(user));
 
-    const token = generateToken(userId);
-
+    // Return success with token
     return jsonResponse({
       success: true,
+      message: 'Registration successful',
       userId,
+      name,
+      email,
       token,
-      message: '✅ Registrasi berhasil!'
     }, 201, corsHeaders);
 
   } catch (error) {
-    return jsonResponse({
-      error: 'Registrasi gagal',
-      message: error.message
-    }, 400, corsHeaders);
+    console.error('Register error:', error);
+    return jsonResponse({ 
+      error: 'Registration failed',
+      message: error.message 
+    }, 500, corsHeaders);
   }
 }
 
 async function handleLogin(request, env, corsHeaders) {
   try {
-    const body = await request.json();
-    const { email, password } = body;
+    const { email, password } = await request.json();
 
+    // Validation
     if (!email || !password) {
-      return jsonResponse({
-        error: 'Email dan password diperlukan'
+      return jsonResponse({ 
+        error: 'Missing email or password' 
       }, 400, corsHeaders);
     }
 
-    const userKey = `user:${email}`;
-    const userData = await env.PEMBUKUAN_KV.get(userKey);
+    const kv = env.PEMBUKUAN_KV;
 
+    // Get user
+    const userData = await kv.get(`user:${email}`);
     if (!userData) {
-      return jsonResponse({
-        error: 'Email atau password salah'
+      return jsonResponse({ 
+        error: 'Invalid email or password' 
       }, 401, corsHeaders);
     }
 
     const user = JSON.parse(userData);
-    
+
     // Verify password
-    if (atob(user.password) !== password) {
-      return jsonResponse({
-        error: 'Email atau password salah'
+    if (user.password !== encodePassword(password)) {
+      return jsonResponse({ 
+        error: 'Invalid email or password' 
       }, 401, corsHeaders);
     }
 
-    const token = generateToken(user.userId);
+    // Generate new token
+    const token = generateToken();
+    user.token = token;
+    user.lastLogin = new Date().toISOString();
 
+    // Update user
+    await kv.put(`user:${email}`, JSON.stringify(user));
+    await kv.put(`user:${user.userId}`, JSON.stringify(user));
+
+    // Return success
     return jsonResponse({
       success: true,
+      message: 'Login successful',
       userId: user.userId,
-      token,
       name: user.name,
       email: user.email,
-      message: '✅ Login berhasil!'
+      token,
     }, 200, corsHeaders);
 
   } catch (error) {
-    return jsonResponse({
-      error: 'Login gagal',
-      message: error.message
-    }, 400, corsHeaders);
+    console.error('Login error:', error);
+    return jsonResponse({ 
+      error: 'Login failed',
+      message: error.message 
+    }, 500, corsHeaders);
+  }
+}
+
+async function handleGetProfile(request, env, corsHeaders) {
+  try {
+    const token = getAuthToken(request);
+    if (!token) {
+      return jsonResponse({ 
+        error: 'Missing authorization token' 
+      }, 401, corsHeaders);
+    }
+
+    const kv = env.PEMBUKUAN_KV;
+    const userId = await getTokenOwner(token, kv);
+
+    if (!userId) {
+      return jsonResponse({ 
+        error: 'Invalid token' 
+      }, 401, corsHeaders);
+    }
+
+    const userData = await kv.get(`user:${userId}`);
+    if (!userData) {
+      return jsonResponse({ 
+        error: 'User not found' 
+      }, 404, corsHeaders);
+    }
+
+    const user = JSON.parse(userData);
+    
+    // Don't return password
+    delete user.password;
+
+    return jsonResponse(user, 200, corsHeaders);
+
+  } catch (error) {
+    console.error('Get profile error:', error);
+    return jsonResponse({ 
+      error: 'Failed to get profile',
+      message: error.message 
+    }, 500, corsHeaders);
   }
 }
 
@@ -232,177 +292,362 @@ async function handleLogin(request, env, corsHeaders) {
 
 async function handleSaveTransactions(request, env, corsHeaders) {
   try {
-    const body = await request.json();
-    const { userId, token, transactions } = body;
+    const { userId, token, transactions } = await request.json();
 
+    // Validation
     if (!userId || !token || !transactions) {
-      return jsonResponse({
-        error: 'userId, token, dan transactions diperlukan'
+      return jsonResponse({ 
+        error: 'Missing required fields: userId, token, transactions' 
+      }, 400, corsHeaders);
+    }
+
+    if (!Array.isArray(transactions)) {
+      return jsonResponse({ 
+        error: 'Transactions must be an array' 
       }, 400, corsHeaders);
     }
 
     // Verify token
-    if (!verifyToken(token, userId)) {
-      return jsonResponse({
-        error: 'Token tidak valid'
+    const kv = env.PEMBUKUAN_KV;
+    const tokenOwner = await getTokenOwner(token, kv);
+
+    if (tokenOwner !== userId) {
+      return jsonResponse({ 
+        error: 'Unauthorized: token does not match userId' 
+      }, 403, corsHeaders);
+    }
+
+    // Validate transactions
+    for (const t of transactions) {
+      if (!t.id || !t.type || !t.amount || !t.date) {
+        return jsonResponse({ 
+          error: 'Invalid transaction format' 
+        }, 400, corsHeaders);
+      }
+    }
+
+    // Save transactions
+    await kv.put(
+      `transactions:${userId}`,
+      JSON.stringify(transactions),
+      { expirationTtl: 365 * 24 * 60 * 60 } // 1 year expiry
+    );
+
+    return jsonResponse({
+      success: true,
+      message: 'Transactions saved successfully',
+      count: transactions.length,
+    }, 200, corsHeaders);
+
+  } catch (error) {
+    console.error('Save transactions error:', error);
+    return jsonResponse({ 
+      error: 'Failed to save transactions',
+      message: error.message 
+    }, 500, corsHeaders);
+  }
+}
+
+async function handleGetTransactions(userId, request, env, corsHeaders) {
+  try {
+    const token = getAuthToken(request);
+    if (!token) {
+      return jsonResponse({ 
+        error: 'Missing authorization token' 
       }, 401, corsHeaders);
     }
 
-    const key = `transactions:${userId}`;
-    await env.PEMBUKUAN_KV.put(key, JSON.stringify({
+    // Verify token
+    const kv = env.PEMBUKUAN_KV;
+    const tokenOwner = await getTokenOwner(token, kv);
+
+    if (tokenOwner !== userId) {
+      return jsonResponse({ 
+        error: 'Unauthorized: cannot access other user data' 
+      }, 403, corsHeaders);
+    }
+
+    // Get transactions
+    const data = await kv.get(`transactions:${userId}`);
+    const transactions = data ? JSON.parse(data) : [];
+
+    return jsonResponse({
+      success: true,
       userId,
       transactions,
-      lastSync: new Date().toISOString()
-    }));
-
-    return jsonResponse({
-      success: true,
-      message: '✅ Data tersimpan di cloud!',
-      count: transactions.length
+      count: transactions.length,
     }, 200, corsHeaders);
 
   } catch (error) {
-    return jsonResponse({
-      error: 'Gagal menyimpan data',
-      message: error.message
-    }, 400, corsHeaders);
+    console.error('Get transactions error:', error);
+    return jsonResponse({ 
+      error: 'Failed to get transactions',
+      message: error.message 
+    }, 500, corsHeaders);
   }
 }
 
-async function handleGetTransactions(userId, env, corsHeaders) {
+async function handleDeleteTransaction(userId, transactionId, request, env, corsHeaders) {
   try {
-    const key = `transactions:${userId}`;
-    const data = await env.PEMBUKUAN_KV.get(key);
-
-    if (!data) {
-      return jsonResponse({
-        transactions: [],
-        message: 'Belum ada data'
-      }, 200, corsHeaders);
-    }
-
-    const parsed = JSON.parse(data);
-    return jsonResponse(parsed, 200, corsHeaders);
-
-  } catch (error) {
-    return jsonResponse({
-      error: 'Gagal mengambil data',
-      message: error.message
-    }, 400, corsHeaders);
-  }
-}
-
-async function handleDeleteTransaction(userId, transactionId, env, corsHeaders) {
-  try {
-    const key = `transactions:${userId}`;
-    const data = await env.PEMBUKUAN_KV.get(key);
-
-    if (!data) {
-      return jsonResponse({
-        error: 'Data tidak ditemukan'
-      }, 404, corsHeaders);
-    }
-
-    const parsed = JSON.parse(data);
-    parsed.transactions = parsed.transactions.filter(t => t.id !== parseInt(transactionId));
-    parsed.lastSync = new Date().toISOString();
-
-    await env.PEMBUKUAN_KV.put(key, JSON.stringify(parsed));
-
-    return jsonResponse({
-      success: true,
-      message: '✅ Transaksi dihapus!'
-    }, 200, corsHeaders);
-
-  } catch (error) {
-    return jsonResponse({
-      error: 'Gagal menghapus transaksi',
-      message: error.message
-    }, 400, corsHeaders);
-  }
-}
-
-async function handleGetStats(userId, env, corsHeaders) {
-  try {
-    const key = `transactions:${userId}`;
-    const data = await env.PEMBUKUAN_KV.get(key);
-
-    if (!data) {
-      return jsonResponse({
-        totalIncome: 0,
-        totalExpense: 0,
-        balance: 0,
-        transactionCount: 0
-      }, 200, corsHeaders);
-    }
-
-    const parsed = JSON.parse(data);
-    const transactions = parsed.transactions || [];
-
-    const totalIncome = transactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const totalExpense = transactions
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    const balance = totalIncome - totalExpense;
-
-    return jsonResponse({
-      totalIncome,
-      totalExpense,
-      balance,
-      transactionCount: transactions.length,
-      lastSync: parsed.lastSync
-    }, 200, corsHeaders);
-
-  } catch (error) {
-    return jsonResponse({
-      error: 'Gagal mengambil stats',
-      message: error.message
-    }, 400, corsHeaders);
-  }
-}
-
-async function handleExport(request, env, corsHeaders) {
-  try {
-    const body = await request.json();
-    const { userId, token } = body;
-
-    if (!userId || !token) {
-      return jsonResponse({
-        error: 'userId dan token diperlukan'
-      }, 400, corsHeaders);
-    }
-
-    if (!verifyToken(token, userId)) {
-      return jsonResponse({
-        error: 'Token tidak valid'
+    const token = getAuthToken(request);
+    if (!token) {
+      return jsonResponse({ 
+        error: 'Missing authorization token' 
       }, 401, corsHeaders);
     }
 
-    const key = `transactions:${userId}`;
-    const data = await env.PEMBUKUAN_KV.get(key);
+    // Verify token
+    const kv = env.PEMBUKUAN_KV;
+    const tokenOwner = await getTokenOwner(token, kv);
 
-    if (!data) {
-      return jsonResponse({
-        error: 'Tidak ada data untuk diekspor'
+    if (tokenOwner !== userId) {
+      return jsonResponse({ 
+        error: 'Unauthorized' 
+      }, 403, corsHeaders);
+    }
+
+    // Get transactions
+    const data = await kv.get(`transactions:${userId}`);
+    let transactions = data ? JSON.parse(data) : [];
+
+    // Remove transaction
+    const originalCount = transactions.length;
+    transactions = transactions.filter(t => t.id !== transactionId);
+
+    if (transactions.length === originalCount) {
+      return jsonResponse({ 
+        error: 'Transaction not found' 
       }, 404, corsHeaders);
     }
 
-    const parsed = JSON.parse(data);
-    
+    // Save updated transactions
+    await kv.put(`transactions:${userId}`, JSON.stringify(transactions));
+
     return jsonResponse({
       success: true,
-      data: parsed,
-      exportTime: new Date().toISOString()
+      message: 'Transaction deleted',
+      transactionId,
     }, 200, corsHeaders);
 
   } catch (error) {
-    return jsonResponse({
-      error: 'Gagal mengekspor data',
-      message: error.message
-    }, 400, corsHeaders);
+    console.error('Delete transaction error:', error);
+    return jsonResponse({ 
+      error: 'Failed to delete transaction',
+      message: error.message 
+    }, 500, corsHeaders);
   }
+}
+
+// ==========================================
+// STATS HANDLERS
+// ==========================================
+
+async function handleGetStats(userId, request, env, corsHeaders) {
+  try {
+    const token = getAuthToken(request);
+    if (!token) {
+      return jsonResponse({ 
+        error: 'Missing authorization token' 
+      }, 401, corsHeaders);
+    }
+
+    // Verify token
+    const kv = env.PEMBUKUAN_KV;
+    const tokenOwner = await getTokenOwner(token, kv);
+
+    if (tokenOwner !== userId) {
+      return jsonResponse({ 
+        error: 'Unauthorized' 
+      }, 403, corsHeaders);
+    }
+
+    // Get transactions
+    const data = await kv.get(`transactions:${userId}`);
+    const transactions = data ? JSON.parse(data) : [];
+
+    // Calculate stats
+    const stats = calculateStats(transactions);
+
+    return jsonResponse({
+      success: true,
+      userId,
+      stats,
+    }, 200, corsHeaders);
+
+  } catch (error) {
+    console.error('Get stats error:', error);
+    return jsonResponse({ 
+      error: 'Failed to get stats',
+      message: error.message 
+    }, 500, corsHeaders);
+  }
+}
+
+// ==========================================
+// EXPORT HANDLERS
+// ==========================================
+
+async function handleExport(userId, request, env, corsHeaders) {
+  try {
+    const token = getAuthToken(request);
+    if (!token) {
+      return jsonResponse({ 
+        error: 'Missing authorization token' 
+      }, 401, corsHeaders);
+    }
+
+    // Verify token
+    const kv = env.PEMBUKUAN_KV;
+    const tokenOwner = await getTokenOwner(token, kv);
+
+    if (tokenOwner !== userId) {
+      return jsonResponse({ 
+        error: 'Unauthorized' 
+      }, 403, corsHeaders);
+    }
+
+    // Get user & transactions
+    const userData = await kv.get(`user:${userId}`);
+    const transData = await kv.get(`transactions:${userId}`);
+
+    if (!userData) {
+      return jsonResponse({ 
+        error: 'User not found' 
+      }, 404, corsHeaders);
+    }
+
+    const user = JSON.parse(userData);
+    const transactions = transData ? JSON.parse(transData) : [];
+
+    // Create export object
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      user: {
+        userId: user.userId,
+        name: user.name,
+        email: user.email,
+      },
+      transactions,
+      summary: calculateStats(transactions),
+    };
+
+    return new Response(JSON.stringify(exportData, null, 2), {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        'Content-Disposition': `attachment; filename="pembukuan-export-${userId}-${Date.now()}.json"`,
+      },
+    });
+
+  } catch (error) {
+    console.error('Export error:', error);
+    return jsonResponse({ 
+      error: 'Failed to export data',
+      message: error.message 
+    }, 500, corsHeaders);
+  }
+}
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+
+function jsonResponse(data, status = 200, headers = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    },
+  });
+}
+
+function generateId() {
+  return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function generateToken() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let token = '';
+  for (let i = 0; i < 64; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
+}
+
+function encodePassword(password) {
+  // WARNING: This is basic encoding, NOT encryption
+  // For production, use proper bcrypt or argon2
+  return btoa(password + ':pembukuan-salt-2026');
+}
+
+function isValidEmail(email) {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
+}
+
+function getAuthToken(request) {
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader) return null;
+  
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
+  
+  return parts[1];
+}
+
+async function getTokenOwner(token, kv) {
+  // Scan users to find matching token (inefficient - should use separate index)
+  // For production, maintain a token -> userId mapping
+  const users = await kv.list({ prefix: 'user:' });
+  
+  for (const user of users.keys) {
+    if (user.name.includes('user:user_')) continue; // Skip userId keys
+    const userData = await kv.get(user.name);
+    if (userData) {
+      const parsed = JSON.parse(userData);
+      if (parsed.token === token) {
+        return parsed.userId;
+      }
+    }
+  }
+  
+  return null;
+}
+
+function calculateStats(transactions) {
+  let totalIncome = 0;
+  let totalExpense = 0;
+  const byCategory = {};
+  const byMonth = {};
+
+  for (const t of transactions) {
+    if (t.type === 'income') {
+      totalIncome += t.amount;
+    } else if (t.type === 'expense') {
+      totalExpense += t.amount;
+    }
+
+    // By category
+    if (!byCategory[t.category]) {
+      byCategory[t.category] = { income: 0, expense: 0 };
+    }
+    byCategory[t.category][t.type] = (byCategory[t.category][t.type] || 0) + t.amount;
+
+    // By month
+    const month = t.date.substring(0, 7);
+    if (!byMonth[month]) {
+      byMonth[month] = { income: 0, expense: 0 };
+    }
+    byMonth[month][t.type] = (byMonth[month][t.type] || 0) + t.amount;
+  }
+
+  return {
+    totalIncome,
+    totalExpense,
+    balance: totalIncome - totalExpense,
+    transactionCount: transactions.length,
+    byCategory,
+    byMonth,
+  };
 }
