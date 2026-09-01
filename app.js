@@ -22,6 +22,9 @@ const EXPENSE_CATEGORIES = [
   'Lainnya'
 ];
 
+// Cloud API configuration
+const API_BASE_URL = 'https://pembukuan-api.your-domain.workers.dev';
+
 // ==========================================
 // LOCALSTORAGE MANAGEMENT
 // ==========================================
@@ -42,6 +45,20 @@ function getCloudCredentials() {
 
 function isCloudConnected() {
   return getCloudCredentials() !== null;
+}
+
+function updateCloudStatus() {
+  const badge = document.getElementById('cloudStatusBadge');
+  if (!badge) return;
+
+  if (isCloudConnected()) {
+    const creds = getCloudCredentials();
+    badge.textContent = `✅ Cloud: ${creds.name}`;
+    badge.classList.add('connected');
+  } else {
+    badge.textContent = '⚫ Offline Mode';
+    badge.classList.remove('connected');
+  }
 }
 
 // ==========================================
@@ -90,7 +107,11 @@ function switchTab(tabName) {
   });
 
   // Show selected tab
-  document.getElementById(tabName).classList.add('active');
+  const tabContent = document.getElementById(tabName);
+  if (tabContent) {
+    tabContent.classList.add('active');
+  }
+  
   event.target.classList.add('active');
 
   // Refresh data when switching tabs
@@ -131,10 +152,82 @@ function setTodayDate() {
 }
 
 // ==========================================
-// ADD TRANSACTION
+// EDIT MODE MANAGEMENT
+// ==========================================
+
+function enterEditMode(id) {
+  const transactions = getTransactions();
+  const transaction = transactions.find(t => t.id === id);
+  
+  if (!transaction) {
+    showToast('❌ Transaksi tidak ditemukan', 'error');
+    return;
+  }
+
+  // Populate form with transaction data
+  document.getElementById('type').value = transaction.type;
+  updateCategories();
+  document.getElementById('category').value = transaction.category;
+  document.getElementById('amount').value = transaction.amount;
+  document.getElementById('date').value = transaction.date;
+  document.getElementById('description').value = transaction.description;
+
+  // Store the ID being edited
+  window.editingTransactionId = id;
+
+  // Show edit mode UI
+  const bannerEl = document.getElementById('editModeBanner');
+  const formTitleEl = document.getElementById('formTitle');
+  const submitBtn = document.getElementById('submitBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+
+  if (bannerEl) bannerEl.style.display = 'flex';
+  if (formTitleEl) formTitleEl.textContent = '✏️ Edit Transaksi';
+  if (submitBtn) submitBtn.textContent = 'Update Transaksi';
+  if (cancelBtn) cancelBtn.style.display = 'block';
+
+  // Scroll to top
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  document.getElementById('amount').focus();
+
+  showToast('📝 Mode edit: ubah data dan klik Update', 'info');
+}
+
+function cancelEdit() {
+  window.editingTransactionId = null;
+
+  // Reset form
+  document.getElementById('type').value = 'income';
+  updateCategories();
+  document.getElementById('amount').value = '';
+  document.getElementById('date').value = '';
+  document.getElementById('description').value = '';
+  setTodayDate();
+
+  // Reset UI
+  const bannerEl = document.getElementById('editModeBanner');
+  const formTitleEl = document.getElementById('formTitle');
+  const submitBtn = document.getElementById('submitBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+
+  if (bannerEl) bannerEl.style.display = 'none';
+  if (formTitleEl) formTitleEl.textContent = 'Tambah Transaksi Baru';
+  if (submitBtn) submitBtn.textContent = 'Simpan Transaksi';
+  if (cancelBtn) cancelBtn.style.display = 'none';
+
+  showToast('✅ Edit dibatalkan', 'info');
+}
+
+// ==========================================
+// ADD / UPDATE TRANSACTION
 // ==========================================
 
 function addTransaction() {
+  if (window.editingTransactionId) {
+    updateTransaction();
+    return;
+  }
+
   const type = document.getElementById('type').value;
   const category = document.getElementById('category').value;
   const amount = parseFloat(document.getElementById('amount').value);
@@ -183,64 +276,10 @@ function addTransaction() {
   }
 }
 
-// ==========================================
-// DELETE TRANSACTION
-// ==========================================
-
-function deleteTransaction(id) {
-  if (!confirm('Yakin hapus transaksi ini?')) return;
-  
-  let transactions = getTransactions();
-  transactions = transactions.filter(t => t.id !== id);
-  saveTransactions(transactions);
-  
-  showToast('✅ Transaksi dihapus!', 'success');
-  renderHistory();
-
-  // Auto sync if connected to cloud
-  if (isCloudConnected()) {
-    autoSyncToCloud();
-  }
-}
-
-// ==========================================
-// EDIT TRANSACTION
-// ==========================================
-
-function editTransaction(id) {
-  const transactions = getTransactions();
-  const transaction = transactions.find(t => t.id === id);
-  
-  if (!transaction) {
-    showToast('❌ Transaksi tidak ditemukan', 'error');
-    return;
-  }
-
-  // Populate form with transaction data
-  document.getElementById('type').value = transaction.type;
-  updateCategories();
-  document.getElementById('category').value = transaction.category;
-  document.getElementById('amount').value = transaction.amount;
-  document.getElementById('date').value = transaction.date;
-  document.getElementById('description').value = transaction.description;
-
-  // Store the ID being edited
-  window.editingTransactionId = id;
-
-  // Scroll to top
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  document.getElementById('amount').focus();
-
-  showToast('📝 Edit transaksi (Simpan untuk update)', 'info');
-}
-
 function updateTransaction() {
-  if (!window.editingTransactionId) {
-    addTransaction();
-    return;
-  }
-
   const id = window.editingTransactionId;
+  if (!id) return;
+
   const type = document.getElementById('type').value;
   const category = document.getElementById('category').value;
   const amount = parseFloat(document.getElementById('amount').value);
@@ -271,13 +310,8 @@ function updateTransaction() {
 
     saveTransactions(transactions);
 
-    // Reset form
-    window.editingTransactionId = null;
-    document.getElementById('type').value = 'income';
-    updateCategories();
-    document.getElementById('amount').value = '';
-    document.getElementById('description').value = '';
-    setTodayDate();
+    // Reset edit mode
+    cancelEdit();
 
     showToast('✅ Transaksi berhasil diupdate!', 'success');
     renderHistory();
@@ -286,6 +320,26 @@ function updateTransaction() {
     if (isCloudConnected()) {
       autoSyncToCloud();
     }
+  }
+}
+
+// ==========================================
+// DELETE TRANSACTION
+// ==========================================
+
+function deleteTransaction(id) {
+  if (!confirm('Yakin hapus transaksi ini?')) return;
+  
+  let transactions = getTransactions();
+  transactions = transactions.filter(t => t.id !== id);
+  saveTransactions(transactions);
+  
+  showToast('✅ Transaksi dihapus!', 'success');
+  renderHistory();
+
+  // Auto sync if connected to cloud
+  if (isCloudConnected()) {
+    autoSyncToCloud();
   }
 }
 
@@ -357,8 +411,8 @@ function renderHistory() {
         </div>
         <div class="transaction-amount ${amountClass}">${amountSign}${formatRupiah(t.amount)}</div>
         <div class="transaction-actions">
-          <button class="btn btn-info btn-small" onclick="editTransaction('${t.id}')">Edit</button>
-          <button class="btn btn-danger btn-small" onclick="deleteTransaction('${t.id}')">Hapus</button>
+          <button class="btn btn-info btn-small" onclick="enterEditMode('${t.id}')">✏️ Edit</button>
+          <button class="btn btn-danger btn-small" onclick="deleteTransaction('${t.id}')">🗑️ Hapus</button>
         </div>
       </div>
     `;
@@ -411,7 +465,6 @@ function renderRecap() {
   // Render month cards
   let html = '';
   sortedMonths.forEach(monthKey => {
-    const [year, month] = monthKey.split('-');
     const monthName = new Date(`${monthKey}-01`).toLocaleString('id-ID', { month: 'long', year: 'numeric' });
     const data = monthlyData[monthKey];
     const balance = data.income - data.expense;
@@ -450,9 +503,18 @@ function renderCloudPanel() {
   if (!credentials) {
     cloudPanelHTML.innerHTML = `
       <div class="cloud-info">
-        <h3>☁️ Cloud Storage</h3>
-        <p>Sinkronisasi data Anda ke cloud untuk akses di berbagai device</p>
-        <button class="btn btn-primary" onclick="goToCloudPage()">Login / Daftar Cloud</button>
+        <h3>☁️ Cloud Storage - Offline</h3>
+        <p>Sinkronisasi data Anda ke cloud untuk akses di berbagai device dan backup data</p>
+        <button class="btn btn-primary" onclick="goToCloudPage()">🔑 Login / Daftar Cloud</button>
+        <div class="cloud-tips" style="margin-top: 20px;">
+          <p style="font-weight: 600; margin-bottom: 10px;">Mengapa pakai cloud?</p>
+          <ul>
+            <li>💾 Backup data otomatis</li>
+            <li>📱 Akses dari berbagai device</li>
+            <li>🔄 Sinkronisasi real-time</li>
+            <li>🔒 Data terenkripsi dan aman</li>
+          </ul>
+        </div>
       </div>
     `;
     return;
@@ -460,19 +522,24 @@ function renderCloudPanel() {
 
   cloudPanelHTML.innerHTML = `
     <div class="cloud-info">
-      <h3>☁️ Cloud Storage - Terhubung</h3>
-      <p>Pengguna: <strong>${credentials.name}</strong> (${credentials.email})</p>
+      <h3>☁️ Cloud Storage - Terhubung ✅</h3>
+      <p><strong>${credentials.name}</strong></p>
+      <p style="font-size: 12px; color: var(--muted);">${credentials.email}</p>
       
       <div class="cloud-actions">
         <button class="btn btn-primary" onclick="syncToCloudFromApp()">📤 Sync ke Cloud</button>
         <button class="btn btn-primary" style="background: var(--success);" onclick="loadFromCloudToApp()">📥 Muat dari Cloud</button>
-        <button class="btn btn-danger" onclick="logoutCloud()">🚪 Logout Cloud</button>
+        <button class="btn btn-danger" onclick="logoutCloud()">🚪 Logout</button>
       </div>
 
       <div class="cloud-tips">
-        <p style="font-size: 13px; color: var(--muted); margin-top: 20px;">
-          💡 <strong>Tips:</strong> Data akan otomatis tersinkronisasi setiap kali Anda menambah/mengubah transaksi jika auto-sync diaktifkan.
-        </p>
+        <p style="font-weight: 600; margin-bottom: 10px;">💡 Tips Penggunaan:</p>
+        <ul>
+          <li>📤 <strong>Sync ke Cloud:</strong> Backup data lokal Anda ke cloud</li>
+          <li>📥 <strong>Muat dari Cloud:</strong> Ambil data terbaru dari cloud storage</li>
+          <li>🔄 <strong>Auto Sync:</strong> Aktif otomatis setiap kali ada perubahan</li>
+          <li>🔒 <strong>Aman:</strong> Data Anda terenkripsi di Cloudflare Workers</li>
+        </ul>
       </div>
     </div>
   `;
@@ -489,7 +556,7 @@ async function syncToCloudFromApp() {
     showToast('📤 Syncing ke cloud...', 'info');
     
     const transactions = getTransactions();
-    const response = await fetch('https://pembukuan-api.your-domain.workers.dev/api/transactions', {
+    const response = await fetch(`${API_BASE_URL}/api/transactions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -508,7 +575,7 @@ async function syncToCloudFromApp() {
       return;
     }
 
-    showToast(`✅ Synced! ${data.count} transaksi tersimpan di cloud`, 'success');
+    showToast(`✅ Synced! ${data.count} transaksi tersimpan`, 'success');
   } catch (error) {
     showToast(`❌ Sync gagal: ${error.message}`, 'error');
   }
@@ -524,7 +591,7 @@ async function loadFromCloudToApp() {
   try {
     showToast('📥 Memuat dari cloud...', 'info');
     
-    const response = await fetch(`https://pembukuan-api.your-domain.workers.dev/api/transactions/${credentials.userId}`, {
+    const response = await fetch(`${API_BASE_URL}/api/transactions/${credentials.userId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -542,6 +609,7 @@ async function loadFromCloudToApp() {
       localStorage.setItem('transactions', JSON.stringify(data.transactions));
       showToast(`✅ Loaded! ${data.transactions.length} transaksi dimuat`, 'success');
       renderHistory();
+      renderRecap();
     } else {
       showToast('✅ Tidak ada data baru di cloud', 'info');
     }
@@ -554,6 +622,7 @@ function logoutCloud() {
   if (confirm('Logout dari cloud? Data lokal tetap aman.')) {
     localStorage.removeItem('cloud_credentials');
     showToast('✅ Logout cloud berhasil', 'success');
+    updateCloudStatus();
     renderCloudPanel();
   }
 }
@@ -564,7 +633,7 @@ async function autoSyncToCloud() {
 
   try {
     const transactions = getTransactions();
-    await fetch('https://pembukuan-api.your-domain.workers.dev/api/transactions', {
+    await fetch(`${API_BASE_URL}/api/transactions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -619,6 +688,7 @@ window.addEventListener('DOMContentLoaded', () => {
   updateCategories();
   renderHistory();
   renderCloudPanel();
+  updateCloudStatus();
 
   // Add toast styles
   const style = document.createElement('style');
@@ -636,6 +706,7 @@ window.addEventListener('DOMContentLoaded', () => {
       z-index: 1000;
       transition: bottom 0.3s ease;
       max-width: 400px;
+      text-align: center;
     }
 
     .toast.show {
@@ -655,6 +726,14 @@ window.addEventListener('DOMContentLoaded', () => {
     .toast-info {
       border-left: 4px solid #6d5dfc;
       color: #6d5dfc;
+    }
+
+    @media (max-width: 600px) {
+      .toast {
+        max-width: calc(100% - 40px);
+        font-size: 12px;
+        padding: 12px 16px;
+      }
     }
   `;
   document.head.appendChild(style);
