@@ -1,25 +1,27 @@
 // ==========================================
 // PEMBUKUAN APP - CLOUD SYNC
 // ==========================================
-// Handles cloud storage integration with Cloudflare Worker
-// Features: Login, Register, Sync, Load from Cloud
+// Cloudflare Worker API Integration
+// ==========================================
 
 // ==========================================
 // CONFIGURATION
 // ==========================================
 
-// Change this to your actual Cloudflare Worker URL
-const API_BASE_URL = 'https://pembukuan-api.your-domain.workers.dev';
-// For local testing: 'http://localhost:8787'
+const API_BASE_URL = 'https://pembukuan-app.viqiquotex.workers.dev';
 
 const API_ENDPOINTS = {
   register: `${API_BASE_URL}/api/auth/register`,
   login: `${API_BASE_URL}/api/auth/login`,
   saveTransactions: `${API_BASE_URL}/api/transactions`,
-  getTransactions: (userId) => `${API_BASE_URL}/api/transactions/${userId}`,
-  deleteTransaction: (userId, transactionId) => `${API_BASE_URL}/api/transactions/${userId}/${transactionId}`,
-  getStats: (userId) => `${API_BASE_URL}/api/stats/${userId}`,
-  export: `${API_BASE_URL}/api/export`,
+  getTransactions: (userId) =>
+    `${API_BASE_URL}/api/transactions/${userId}`,
+  deleteTransaction: (userId, transactionId) =>
+    `${API_BASE_URL}/api/transactions/${userId}/${transactionId}`,
+  getStats: (userId) =>
+    `${API_BASE_URL}/api/stats/${userId}`,
+  export: (userId) =>
+    `${API_BASE_URL}/api/export/${userId}`,
 };
 
 // ==========================================
@@ -32,7 +34,10 @@ function getCloudCredentials() {
 }
 
 function saveCloudCredentials(credentials) {
-  localStorage.setItem('cloud_credentials', JSON.stringify(credentials));
+  localStorage.setItem(
+    'cloud_credentials',
+    JSON.stringify(credentials)
+  );
 }
 
 function clearCloudCredentials() {
@@ -52,7 +57,6 @@ async function handleRegister() {
   const email = document.getElementById('registerEmail').value.trim();
   const password = document.getElementById('registerPassword').value;
 
-  // Validation
   if (!name || !email || !password) {
     showError('Semua field harus diisi');
     return;
@@ -69,7 +73,7 @@ async function handleRegister() {
   }
 
   try {
-    setLoading(true, 'Mendaftarkan...');
+    setLoading(true);
 
     const response = await fetch(API_ENDPOINTS.register, {
       method: 'POST',
@@ -90,18 +94,18 @@ async function handleRegister() {
       return;
     }
 
-    // Save credentials
     saveCloudCredentials({
       userId: data.userId,
       token: data.token,
-      name: name,
-      email: email,
+      name: data.name,
+      email: data.email,
     });
 
-    showSuccess('✅ Registrasi berhasil! Sekarang sync data Anda.');
+    showSuccess('✅ Registrasi berhasil!');
+
     setTimeout(() => {
       showDashboard();
-    }, 1500);
+    }, 1000);
 
   } catch (error) {
     showError(`Registrasi gagal: ${error.message}`);
@@ -114,14 +118,13 @@ async function handleLogin() {
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
 
-  // Validation
   if (!email || !password) {
     showError('Email dan password harus diisi');
     return;
   }
 
   try {
-    setLoading(true, 'Sedang login...');
+    setLoading(true);
 
     const response = await fetch(API_ENDPOINTS.login, {
       method: 'POST',
@@ -141,7 +144,6 @@ async function handleLogin() {
       return;
     }
 
-    // Save credentials
     saveCloudCredentials({
       userId: data.userId,
       token: data.token,
@@ -150,9 +152,10 @@ async function handleLogin() {
     });
 
     showSuccess(`✅ Login berhasil! Halo ${data.name}`);
+
     setTimeout(() => {
       showDashboard();
-    }, 1500);
+    }, 1000);
 
   } catch (error) {
     showError(`Login gagal: ${error.message}`);
@@ -162,40 +165,48 @@ async function handleLogin() {
 }
 
 function handleLogout() {
-  if (confirm('Yakin logout? Data lokal Anda tetap aman.')) {
-    clearCloudCredentials();
-    location.reload();
+  if (!confirm('Yakin logout? Data lokal Anda tetap aman.')) {
+    return;
   }
+
+  clearCloudCredentials();
+  location.reload();
 }
 
 // ==========================================
-// CLOUD SYNC HANDLERS
+// CLOUD SYNC
 // ==========================================
 
 async function syncToCloud() {
   const credentials = getCloudCredentials();
+
   if (!credentials) {
     showError('Anda harus login terlebih dahulu');
     return;
   }
 
   try {
-    setLoading(true, 'Syncing ke cloud...');
+    setLoading(true);
 
-    // Get transactions from localStorage
-    const transactions = JSON.parse(localStorage.getItem('transactions') || '[]');
+    const transactions = JSON.parse(
+      localStorage.getItem('transactions') || '[]'
+    );
 
-    const response = await fetch(API_ENDPOINTS.saveTransactions, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        userId: credentials.userId,
-        token: credentials.token,
-        transactions: transactions,
-      }),
-    });
+    const response = await fetch(
+      API_ENDPOINTS.saveTransactions,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${credentials.token}`,
+        },
+        body: JSON.stringify({
+          userId: credentials.userId,
+          token: credentials.token,
+          transactions,
+        }),
+      }
+    );
 
     const data = await response.json();
 
@@ -204,8 +215,11 @@ async function syncToCloud() {
       return;
     }
 
-    showSuccess(`✅ Synced! ${data.count} transaksi tersimpan di cloud`);
-    loadStats();
+    showSuccess(
+      `✅ ${data.count} transaksi tersimpan di cloud`
+    );
+
+    await loadStats();
 
   } catch (error) {
     showError(`Sync gagal: ${error.message}`);
@@ -214,22 +228,31 @@ async function syncToCloud() {
   }
 }
 
+// ==========================================
+// LOAD FROM CLOUD
+// ==========================================
+
 async function loadFromCloud() {
   const credentials = getCloudCredentials();
+
   if (!credentials) {
     showError('Anda harus login terlebih dahulu');
     return;
   }
 
   try {
-    setLoading(true, 'Memuat dari cloud...');
+    setLoading(true);
 
-    const response = await fetch(API_ENDPOINTS.getTransactions(credentials.userId), {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await fetch(
+      API_ENDPOINTS.getTransactions(credentials.userId),
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${credentials.token}`,
+        },
+      }
+    );
 
     const data = await response.json();
 
@@ -238,18 +261,39 @@ async function loadFromCloud() {
       return;
     }
 
-    if (data.transactions && data.transactions.length > 0) {
-      // Merge dengan data lokal
-      const localTransactions = JSON.parse(localStorage.getItem('transactions') || '[]');
-      const merged = mergeTransactions(localTransactions, data.transactions);
-      localStorage.setItem('transactions', JSON.stringify(merged));
+    if (Array.isArray(data.transactions)) {
+      const localTransactions = JSON.parse(
+        localStorage.getItem('transactions') || '[]'
+      );
 
-      showSuccess(`✅ Loaded! ${merged.length} transaksi (merged)`);
+      const merged = mergeTransactions(
+        localTransactions,
+        data.transactions
+      );
+
+      localStorage.setItem(
+        'transactions',
+        JSON.stringify(merged)
+      );
+
+      showSuccess(
+        `✅ ${merged.length} transaksi tersedia`
+      );
+
+      // Refresh main app if available
+      if (typeof renderHistory === 'function') {
+        renderHistory();
+      }
+
+      if (typeof renderRecap === 'function') {
+        renderRecap();
+      }
+
     } else {
-      showSuccess('✅ Tidak ada data baru di cloud');
+      showSuccess('✅ Tidak ada transaksi di cloud');
     }
 
-    loadStats();
+    await loadStats();
 
   } catch (error) {
     showError(`Load gagal: ${error.message}`);
@@ -259,48 +303,93 @@ async function loadFromCloud() {
 }
 
 // ==========================================
-// STATS & DASHBOARD
+// LOAD CLOUD STATS
 // ==========================================
 
 async function loadStats() {
   const credentials = getCloudCredentials();
-  if (!credentials) return;
+
+  if (!credentials) {
+    return;
+  }
 
   try {
-    const response = await fetch(API_ENDPOINTS.getStats(credentials.userId), {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
+    const response = await fetch(
+      API_ENDPOINTS.getStats(credentials.userId),
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${credentials.token}`,
+        },
+      }
+    );
 
-    const stats = await response.json();
+    const data = await response.json();
 
-    if (response.ok) {
-      document.getElementById('userName').textContent = credentials.name;
+    if (!response.ok) {
+      console.error('Stats error:', data);
+      return;
+    }
 
-      const statsHTML = `
+    // Worker response:
+    // {
+    //   success: true,
+    //   userId: "...",
+    //   stats: {...}
+    // }
+
+    const stats = data.stats;
+
+    if (!stats) {
+      return;
+    }
+
+    const userName = document.getElementById('userName');
+    const statsContainer =
+      document.getElementById('statsContainer');
+
+    if (userName) {
+      userName.textContent = credentials.name;
+    }
+
+    if (statsContainer) {
+      statsContainer.innerHTML = `
         <div class="stat-card">
           <div class="label">💰 Total Pemasukan</div>
-          <div class="value">${formatRupiah(stats.totalIncome)}</div>
+          <div class="value">
+            ${formatRupiah(stats.totalIncome)}
+          </div>
         </div>
+
         <div class="stat-card">
           <div class="label">💸 Total Pengeluaran</div>
-          <div class="value">${formatRupiah(stats.totalExpense)}</div>
+          <div class="value">
+            ${formatRupiah(stats.totalExpense)}
+          </div>
         </div>
+
         <div class="stat-card">
           <div class="label">📊 Saldo</div>
-          <div class="value">${formatRupiah(stats.balance)}</div>
+          <div class="value">
+            ${formatRupiah(stats.balance)}
+          </div>
         </div>
+
         <div class="stat-card">
           <div class="label">📝 Transaksi</div>
-          <div class="value">${stats.transactionCount}</div>
+          <div class="value">
+            ${stats.transactionCount}
+          </div>
         </div>
       `;
-      document.getElementById('statsContainer').innerHTML = statsHTML;
     }
+
   } catch (error) {
-    console.error('Failed to load stats:', error);
+    console.error(
+      'Failed to load stats:',
+      error
+    );
   }
 }
 
@@ -309,67 +398,110 @@ async function loadStats() {
 // ==========================================
 
 function toggleAuthForm() {
-  document.getElementById('loginForm').classList.toggle('hidden');
-  document.getElementById('registerForm').classList.toggle('hidden');
+  document
+    .getElementById('loginForm')
+    .classList.toggle('hidden');
+
+  document
+    .getElementById('registerForm')
+    .classList.toggle('hidden');
 }
 
 function showDashboard() {
-  document.getElementById('authSection').style.display = 'none';
-  document.getElementById('dashboard').classList.add('show');
+  const authSection =
+    document.getElementById('authSection');
+
+  const dashboard =
+    document.getElementById('dashboard');
+
+  if (authSection) {
+    authSection.style.display = 'none';
+  }
+
+  if (dashboard) {
+    dashboard.classList.add('show');
+  }
+
   loadStats();
 }
 
 function showAuth() {
-  document.getElementById('authSection').style.display = 'block';
-  document.getElementById('dashboard').classList.remove('show');
+  const authSection =
+    document.getElementById('authSection');
+
+  const dashboard =
+    document.getElementById('dashboard');
+
+  if (authSection) {
+    authSection.style.display = 'block';
+  }
+
+  if (dashboard) {
+    dashboard.classList.remove('show');
+  }
 }
 
 function showError(message) {
-  const errorEl = document.getElementById('errorMsg');
+  const errorEl =
+    document.getElementById('errorMsg');
+
+  if (!errorEl) {
+    alert(message);
+    return;
+  }
+
   errorEl.textContent = message;
   errorEl.style.display = 'block';
-  errorEl.style.animation = 'none';
-  setTimeout(() => {
-    errorEl.style.animation = 'slideIn 0.3s ease';
-  }, 10);
+
   setTimeout(() => {
     errorEl.style.display = 'none';
   }, 4000);
 }
 
 function showSuccess(message) {
-  const successEl = document.getElementById('successMsg');
+  const successEl =
+    document.getElementById('successMsg');
+
+  if (!successEl) {
+    alert(message);
+    return;
+  }
+
   successEl.textContent = message;
   successEl.style.display = 'block';
-  successEl.style.animation = 'none';
-  setTimeout(() => {
-    successEl.style.animation = 'slideIn 0.3s ease';
-  }, 10);
+
   setTimeout(() => {
     successEl.style.display = 'none';
   }, 4000);
 }
 
-function setLoading(isLoading, text = 'Loading...') {
-  const buttons = document.querySelectorAll('.btn-primary, .btn-secondary');
+function setLoading(isLoading) {
+  const buttons =
+    document.querySelectorAll(
+      '.btn-primary, .btn-secondary'
+    );
+
   buttons.forEach(btn => {
+    btn.disabled = isLoading;
+
     if (isLoading) {
       btn.classList.add('loading');
-      btn.disabled = true;
     } else {
       btn.classList.remove('loading');
-      btn.disabled = false;
     }
   });
 }
 
+// ==========================================
+// NAVIGATION
+// ==========================================
+
 function goToApp() {
-  // Redirect to main app
   window.location.href = './index.html';
 }
 
 // ==========================================
-// UTILITY FUNCTIONS
+// UTILITY
 // ==========================================
 
 function formatRupiah(amount) {
@@ -382,53 +514,60 @@ function formatRupiah(amount) {
 }
 
 function isValidEmail(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const emailRegex =
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
   return emailRegex.test(email);
 }
 
 function mergeTransactions(local, cloud) {
-  // Create map by ID to avoid duplicates
   const merged = new Map();
 
-  // Add cloud transactions first
-  cloud.forEach(t => {
-    merged.set(t.id, t);
+  cloud.forEach(transaction => {
+    merged.set(transaction.id, transaction);
   });
 
-  // Add/override with local transactions (local takes priority)
-  local.forEach(t => {
-    merged.set(t.id, t);
+  local.forEach(transaction => {
+    merged.set(transaction.id, transaction);
   });
 
-  // Return as array, sorted by date descending
-  return Array.from(merged.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
+  return Array.from(merged.values()).sort(
+    (a, b) =>
+      new Date(b.date) - new Date(a.date)
+  );
 }
 
 // ==========================================
-// INIT ON PAGE LOAD
+// INIT
 // ==========================================
 
-window.addEventListener('DOMContentLoaded', () => {
-  // Check if already logged in
-  if (isCloudConnected()) {
-    showDashboard();
-  } else {
-    showAuth();
-  }
+window.addEventListener(
+  'DOMContentLoaded',
+  () => {
 
-  // Add CSS animations
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateY(-10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+    if (isCloudConnected()) {
+      showDashboard();
+    } else {
+      showAuth();
     }
-  `;
-  document.head.appendChild(style);
-});
+
+    const style =
+      document.createElement('style');
+
+    style.textContent = `
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(-10px);
+        }
+
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    `;
+
+    document.head.appendChild(style);
+  }
+);
