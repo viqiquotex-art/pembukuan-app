@@ -35,6 +35,15 @@ function saveTransactions(transactions) {
   localStorage.setItem('transactions', JSON.stringify(transactions));
 }
 
+function getCloudCredentials() {
+  const credentials = localStorage.getItem('cloud_credentials');
+  return credentials ? JSON.parse(credentials) : null;
+}
+
+function isCloudConnected() {
+  return getCloudCredentials() !== null;
+}
+
 // ==========================================
 // FORMAT RUPIAH
 // ==========================================
@@ -89,6 +98,8 @@ function switchTab(tabName) {
     renderHistory();
   } else if (tabName === 'recap') {
     renderRecap();
+  } else if (tabName === 'cloud') {
+    renderCloudPanel();
   }
 }
 
@@ -132,17 +143,17 @@ function addTransaction() {
 
   // Validation
   if (!amount || amount <= 0) {
-    alert('Masukkan jumlah yang valid');
+    showToast('❌ Masukkan jumlah yang valid', 'error');
     return;
   }
   if (!date) {
-    alert('Pilih tanggal');
+    showToast('❌ Pilih tanggal', 'error');
     return;
   }
 
-  // Create transaction object
+  // Create transaction object with unique ID
   const transaction = {
-    id: Date.now(),
+    id: `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     type,
     category,
     amount,
@@ -163,8 +174,13 @@ function addTransaction() {
   document.getElementById('description').value = '';
   setTodayDate();
 
-  alert('✅ Transaksi berhasil disimpan!');
+  showToast('✅ Transaksi berhasil disimpan!', 'success');
   renderHistory();
+
+  // Auto sync if connected to cloud
+  if (isCloudConnected()) {
+    autoSyncToCloud();
+  }
 }
 
 // ==========================================
@@ -178,7 +194,99 @@ function deleteTransaction(id) {
   transactions = transactions.filter(t => t.id !== id);
   saveTransactions(transactions);
   
+  showToast('✅ Transaksi dihapus!', 'success');
   renderHistory();
+
+  // Auto sync if connected to cloud
+  if (isCloudConnected()) {
+    autoSyncToCloud();
+  }
+}
+
+// ==========================================
+// EDIT TRANSACTION
+// ==========================================
+
+function editTransaction(id) {
+  const transactions = getTransactions();
+  const transaction = transactions.find(t => t.id === id);
+  
+  if (!transaction) {
+    showToast('❌ Transaksi tidak ditemukan', 'error');
+    return;
+  }
+
+  // Populate form with transaction data
+  document.getElementById('type').value = transaction.type;
+  updateCategories();
+  document.getElementById('category').value = transaction.category;
+  document.getElementById('amount').value = transaction.amount;
+  document.getElementById('date').value = transaction.date;
+  document.getElementById('description').value = transaction.description;
+
+  // Store the ID being edited
+  window.editingTransactionId = id;
+
+  // Scroll to top
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  document.getElementById('amount').focus();
+
+  showToast('📝 Edit transaksi (Simpan untuk update)', 'info');
+}
+
+function updateTransaction() {
+  if (!window.editingTransactionId) {
+    addTransaction();
+    return;
+  }
+
+  const id = window.editingTransactionId;
+  const type = document.getElementById('type').value;
+  const category = document.getElementById('category').value;
+  const amount = parseFloat(document.getElementById('amount').value);
+  const date = document.getElementById('date').value;
+  const description = document.getElementById('description').value;
+
+  // Validation
+  if (!amount || amount <= 0) {
+    showToast('❌ Masukkan jumlah yang valid', 'error');
+    return;
+  }
+  if (!date) {
+    showToast('❌ Pilih tanggal', 'error');
+    return;
+  }
+
+  // Update transaction
+  let transactions = getTransactions();
+  const transaction = transactions.find(t => t.id === id);
+  
+  if (transaction) {
+    transaction.type = type;
+    transaction.category = category;
+    transaction.amount = amount;
+    transaction.date = date;
+    transaction.description = description;
+    transaction.updatedAt = new Date().toISOString();
+
+    saveTransactions(transactions);
+
+    // Reset form
+    window.editingTransactionId = null;
+    document.getElementById('type').value = 'income';
+    updateCategories();
+    document.getElementById('amount').value = '';
+    document.getElementById('description').value = '';
+    setTodayDate();
+
+    showToast('✅ Transaksi berhasil diupdate!', 'success');
+    renderHistory();
+
+    // Auto sync if connected to cloud
+    if (isCloudConnected()) {
+      autoSyncToCloud();
+    }
+  }
 }
 
 // ==========================================
@@ -249,7 +357,8 @@ function renderHistory() {
         </div>
         <div class="transaction-amount ${amountClass}">${amountSign}${formatRupiah(t.amount)}</div>
         <div class="transaction-actions">
-          <button class="btn btn-danger btn-small" onclick="deleteTransaction(${t.id})">Hapus</button>
+          <button class="btn btn-info btn-small" onclick="editTransaction('${t.id}')">Edit</button>
+          <button class="btn btn-danger btn-small" onclick="deleteTransaction('${t.id}')">Hapus</button>
         </div>
       </div>
     `;
@@ -331,6 +440,177 @@ function renderRecap() {
 }
 
 // ==========================================
+// CLOUD SYNC PANEL
+// ==========================================
+
+function renderCloudPanel() {
+  const credentials = getCloudCredentials();
+  const cloudPanelHTML = document.getElementById('cloudPanel');
+
+  if (!credentials) {
+    cloudPanelHTML.innerHTML = `
+      <div class="cloud-info">
+        <h3>☁️ Cloud Storage</h3>
+        <p>Sinkronisasi data Anda ke cloud untuk akses di berbagai device</p>
+        <button class="btn btn-primary" onclick="goToCloudPage()">Login / Daftar Cloud</button>
+      </div>
+    `;
+    return;
+  }
+
+  cloudPanelHTML.innerHTML = `
+    <div class="cloud-info">
+      <h3>☁️ Cloud Storage - Terhubung</h3>
+      <p>Pengguna: <strong>${credentials.name}</strong> (${credentials.email})</p>
+      
+      <div class="cloud-actions">
+        <button class="btn btn-primary" onclick="syncToCloudFromApp()">📤 Sync ke Cloud</button>
+        <button class="btn btn-primary" style="background: var(--success);" onclick="loadFromCloudToApp()">📥 Muat dari Cloud</button>
+        <button class="btn btn-danger" onclick="logoutCloud()">🚪 Logout Cloud</button>
+      </div>
+
+      <div class="cloud-tips">
+        <p style="font-size: 13px; color: var(--muted); margin-top: 20px;">
+          💡 <strong>Tips:</strong> Data akan otomatis tersinkronisasi setiap kali Anda menambah/mengubah transaksi jika auto-sync diaktifkan.
+        </p>
+      </div>
+    </div>
+  `;
+}
+
+async function syncToCloudFromApp() {
+  const credentials = getCloudCredentials();
+  if (!credentials) {
+    showToast('❌ Silakan login cloud terlebih dahulu', 'error');
+    return;
+  }
+
+  try {
+    showToast('📤 Syncing ke cloud...', 'info');
+    
+    const transactions = getTransactions();
+    const response = await fetch('https://pembukuan-api.your-domain.workers.dev/api/transactions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userId: credentials.userId,
+        token: credentials.token,
+        transactions: transactions,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      showToast(`❌ ${data.error || 'Sync gagal'}`, 'error');
+      return;
+    }
+
+    showToast(`✅ Synced! ${data.count} transaksi tersimpan di cloud`, 'success');
+  } catch (error) {
+    showToast(`❌ Sync gagal: ${error.message}`, 'error');
+  }
+}
+
+async function loadFromCloudToApp() {
+  const credentials = getCloudCredentials();
+  if (!credentials) {
+    showToast('❌ Silakan login cloud terlebih dahulu', 'error');
+    return;
+  }
+
+  try {
+    showToast('📥 Memuat dari cloud...', 'info');
+    
+    const response = await fetch(`https://pembukuan-api.your-domain.workers.dev/api/transactions/${credentials.userId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      showToast(`❌ ${data.error || 'Load gagal'}`, 'error');
+      return;
+    }
+
+    if (data.transactions && data.transactions.length > 0) {
+      localStorage.setItem('transactions', JSON.stringify(data.transactions));
+      showToast(`✅ Loaded! ${data.transactions.length} transaksi dimuat`, 'success');
+      renderHistory();
+    } else {
+      showToast('✅ Tidak ada data baru di cloud', 'info');
+    }
+  } catch (error) {
+    showToast(`❌ Load gagal: ${error.message}`, 'error');
+  }
+}
+
+function logoutCloud() {
+  if (confirm('Logout dari cloud? Data lokal tetap aman.')) {
+    localStorage.removeItem('cloud_credentials');
+    showToast('✅ Logout cloud berhasil', 'success');
+    renderCloudPanel();
+  }
+}
+
+async function autoSyncToCloud() {
+  const credentials = getCloudCredentials();
+  if (!credentials) return;
+
+  try {
+    const transactions = getTransactions();
+    await fetch('https://pembukuan-api.your-domain.workers.dev/api/transactions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userId: credentials.userId,
+        token: credentials.token,
+        transactions: transactions,
+      }),
+    });
+  } catch (error) {
+    console.log('Auto sync background error:', error);
+  }
+}
+
+function goToCloudPage() {
+  window.location.href = './cloud.html';
+}
+
+// ==========================================
+// TOAST NOTIFICATIONS
+// ==========================================
+
+function showToast(message, type = 'info') {
+  // Remove existing toast
+  const existingToast = document.querySelector('.toast');
+  if (existingToast) {
+    existingToast.remove();
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  // Trigger animation
+  setTimeout(() => toast.classList.add('show'), 10);
+
+  // Remove after 3 seconds
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// ==========================================
 // INIT ON PAGE LOAD
 // ==========================================
 
@@ -338,4 +618,44 @@ window.addEventListener('DOMContentLoaded', () => {
   setTodayDate();
   updateCategories();
   renderHistory();
+  renderCloudPanel();
+
+  // Add toast styles
+  const style = document.createElement('style');
+  style.textContent = `
+    .toast {
+      position: fixed;
+      bottom: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: white;
+      padding: 16px 24px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      font-size: 14px;
+      z-index: 1000;
+      transition: bottom 0.3s ease;
+      max-width: 400px;
+    }
+
+    .toast.show {
+      bottom: 20px;
+    }
+
+    .toast-success {
+      border-left: 4px solid #45a86b;
+      color: #45a86b;
+    }
+
+    .toast-error {
+      border-left: 4px solid #ef4444;
+      color: #ef4444;
+    }
+
+    .toast-info {
+      border-left: 4px solid #6d5dfc;
+      color: #6d5dfc;
+    }
+  `;
+  document.head.appendChild(style);
 });
