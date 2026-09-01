@@ -17,6 +17,7 @@
       --success: #45a86b;
       --danger: #ef4444;
       --warning: #f59e0b;
+      --info: #3b82f6;
       --bg: #f3f4f6;
       --surface: #ffffff;
       --text: #202124;
@@ -44,16 +45,40 @@
       border-radius: 12px;
       margin-bottom: 30px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
     }
 
-    .header h1 {
+    .header-left h1 {
       font-size: 28px;
       margin-bottom: 10px;
     }
 
-    .header p {
+    .header-left p {
       color: var(--muted);
       font-size: 14px;
+    }
+
+    .header-right {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .cloud-status {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 8px 12px;
+      background: #f3f4f6;
+      border-radius: 6px;
+    }
+
+    .cloud-status.connected {
+      color: var(--success);
+      background: rgba(69, 168, 107, 0.1);
     }
 
     /* ========== TABS ========== */
@@ -62,6 +87,7 @@
       gap: 10px;
       margin-bottom: 30px;
       border-bottom: 2px solid var(--border);
+      overflow-x: auto;
     }
 
     .tab-btn {
@@ -75,6 +101,7 @@
       border-bottom: 3px solid transparent;
       transition: all 0.3s ease;
       margin-bottom: -2px;
+      white-space: nowrap;
     }
 
     .tab-btn.active {
@@ -147,14 +174,28 @@
       transition: all 0.2s ease;
     }
 
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
     .btn-primary {
       background: var(--primary);
       color: white;
     }
 
-    .btn-primary:hover {
+    .btn-primary:hover:not(:disabled) {
       background: var(--primary-light);
       transform: translateY(-1px);
+    }
+
+    .btn-info {
+      background: var(--info);
+      color: white;
+    }
+
+    .btn-info:hover:not(:disabled) {
+      background: #2563eb;
     }
 
     .btn-danger {
@@ -162,8 +203,17 @@
       color: white;
     }
 
-    .btn-danger:hover {
+    .btn-danger:hover:not(:disabled) {
       background: #dc2626;
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-success:hover:not(:disabled) {
+      background: #399660;
     }
 
     .btn-small {
@@ -233,6 +283,8 @@
       justify-content: space-between;
       align-items: center;
       transition: background 0.2s ease;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
     .transaction-item:last-child {
@@ -245,6 +297,7 @@
 
     .transaction-info {
       flex: 1;
+      min-width: 200px;
     }
 
     .transaction-category {
@@ -268,7 +321,6 @@
     .transaction-amount {
       font-weight: 700;
       font-size: 16px;
-      margin-right: 15px;
       min-width: 100px;
       text-align: right;
     }
@@ -284,6 +336,7 @@
     .transaction-actions {
       display: flex;
       gap: 8px;
+      flex-wrap: wrap;
     }
 
     /* ========== MONTHLY RECAP ========== */
@@ -342,6 +395,61 @@
       font-weight: 700;
     }
 
+    /* ========== CLOUD PANEL ========== */
+    .cloud-info {
+      background: var(--surface);
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      border-left: 4px solid var(--info);
+    }
+
+    .cloud-info h3 {
+      font-size: 18px;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+
+    .cloud-info p {
+      color: var(--muted);
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .cloud-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .cloud-actions .btn {
+      flex: 1;
+      min-width: 150px;
+    }
+
+    .cloud-tips {
+      background: rgba(59, 130, 246, 0.05);
+      padding: 15px;
+      border-radius: 8px;
+      border-left: 3px solid var(--info);
+    }
+
+    .cloud-tips ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .cloud-tips li {
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .cloud-tips li:last-child {
+      margin-bottom: 0;
+    }
+
     /* ========== EMPTY STATE ========== */
     .empty-state {
       text-align: center;
@@ -355,8 +463,42 @@
       color: var(--text);
     }
 
+    /* ========== EDIT MODE ========== */
+    .edit-mode-banner {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid var(--info);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .edit-mode-banner p {
+      font-size: 14px;
+      color: var(--info);
+      margin: 0;
+    }
+
+    .edit-mode-banner .btn {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
     /* ========== RESPONSIVE ========== */
-    @media (max-width: 600px) {
+    @media (max-width: 768px) {
+      .header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .header-right {
+        width: 100%;
+        flex-direction: column;
+      }
+
       .form-row {
         grid-template-columns: 1fr;
       }
@@ -367,12 +509,48 @@
       }
 
       .transaction-amount {
-        margin-right: 0;
+        align-self: flex-end;
         margin-top: 10px;
       }
 
       .stats-grid {
         grid-template-columns: 1fr;
+      }
+
+      .tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+      }
+
+      .cloud-actions .btn {
+        min-width: 120px;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .container {
+        padding: 10px;
+      }
+
+      .header {
+        padding: 15px;
+      }
+
+      .header-left h1 {
+        font-size: 22px;
+      }
+
+      .transaction-actions {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .cloud-actions {
+        flex-direction: column;
+      }
+
+      .cloud-actions .btn {
+        width: 100%;
       }
     }
 
@@ -384,6 +562,13 @@
     .text-center {
       text-align: center;
     }
+
+    .form-section {
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
   </style>
 </head>
 <body>
@@ -391,8 +576,15 @@
 <div class="container">
   <!-- HEADER -->
   <div class="header">
-    <h1>📊 Pembukuan Keuangan</h1>
-    <p>Kelola pemasukan dan pengeluaran dengan mudah</p>
+    <div class="header-left">
+      <h1>📊 Pembukuan Keuangan</h1>
+      <p>Kelola pemasukan dan pengeluaran dengan mudah</p>
+    </div>
+    <div class="header-right">
+      <div id="cloudStatusBadge" class="cloud-status">
+        ⚫ Offline
+      </div>
+    </div>
   </div>
 
   <!-- TABS -->
@@ -400,12 +592,18 @@
     <button class="tab-btn active" onclick="switchTab('input')">➕ Input Transaksi</button>
     <button class="tab-btn" onclick="switchTab('history')">📋 Riwayat</button>
     <button class="tab-btn" onclick="switchTab('recap')">📈 Rekap Bulanan</button>
+    <button class="tab-btn" onclick="switchTab('cloud')">☁️ Cloud Storage</button>
   </div>
 
   <!-- ========== TAB 1: INPUT TRANSAKSI ========== -->
   <div id="input" class="tab-content active">
-    <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
-      <h2 style="margin-bottom: 25px; font-size: 20px;">Tambah Transaksi Baru</h2>
+    <div id="editModeBanner" class="edit-mode-banner" style="display: none;">
+      <p>✏️ Mode edit aktif - ubah data transaksi dan klik Simpan untuk update</p>
+      <button class="btn btn-small" onclick="cancelEdit()" style="background: var(--muted);">Batal</button>
+    </div>
+
+    <div class="form-section">
+      <h2 style="margin-bottom: 25px; font-size: 20px;" id="formTitle">Tambah Transaksi Baru</h2>
       
       <div class="form-row">
         <div class="form-group">
@@ -437,7 +635,10 @@
         <textarea id="description" placeholder="Tuliskan detail transaksi..."></textarea>
       </div>
 
-      <button class="btn btn-primary mt-20" onclick="addTransaction()" style="width: 100%; padding: 14px;">Simpan Transaksi</button>
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn btn-primary" id="submitBtn" onclick="addTransaction()" style="flex: 1; padding: 14px;">Simpan Transaksi</button>
+        <button class="btn" id="cancelBtn" onclick="cancelEdit()" style="flex: 1; padding: 14px; background: var(--border); color: var(--text); display: none;">Batal Edit</button>
+      </div>
     </div>
   </div>
 
@@ -460,6 +661,11 @@
       <h2 style="margin-bottom: 20px; font-size: 20px;">Rekap Bulanan</h2>
       <div class="recap-grid" id="recapGrid"></div>
     </div>
+  </div>
+
+  <!-- ========== TAB 4: CLOUD STORAGE ========== -->
+  <div id="cloud" class="tab-content">
+    <div id="cloudPanel"></div>
   </div>
 
 </div>
