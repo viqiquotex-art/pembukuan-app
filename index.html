@@ -2,597 +2,318 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-  >
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Pembukuan App</title>
-
-  <!-- CSS UTAMA -->
   <link rel="stylesheet" href="./style.css">
 </head>
-
 <body>
-
   <div class="app-shell">
-
-    <!-- ==========================================
-         HEADER
-         ========================================== -->
-
     <header class="header">
-
       <div class="header-left">
-
         <div class="app-brand">
           <div class="app-icon">📊</div>
-
           <div>
             <h1>Pembukuan</h1>
             <p>Kelola keuangan dengan mudah</p>
           </div>
         </div>
-
       </div>
-
       <div class="header-right">
-
-        <div
-          id="cloudStatusBadge"
-          class="cloud-status"
-        >
-          ⚫ Offline
-        </div>
-
+        <div id="cloudStatusBadge" class="cloud-status">⚫ Offline</div>
       </div>
-
     </header>
 
-
-    <!-- ==========================================
-         APP NAVIGATION
-         ========================================== -->
-
     <nav class="tabs" aria-label="Navigasi">
-
-      <button
-        class="tab-btn active"
-        data-tab="input"
-        onclick="switchTab('input')"
-      >
-        <span class="tab-icon">➕</span>
-        <span>Transaksi</span>
+      <button class="tab-btn active" data-tab="input" onclick="switchTab('input')">
+        <span class="tab-icon">➕</span><span>Transaksi</span>
       </button>
-
-
-      <button
-        class="tab-btn"
-        data-tab="history"
-        onclick="switchTab('history')"
-      >
-        <span class="tab-icon">📋</span>
-        <span>Riwayat</span>
+      <button class="tab-btn" data-tab="history" onclick="switchTab('history')">
+        <span class="tab-icon">📋</span><span>Riwayat</span>
       </button>
-
-
-      <button
-        class="tab-btn"
-        data-tab="recap"
-        onclick="switchTab('recap')"
-      >
-        <span class="tab-icon">📊</span>
-        <span>Rekap</span>
+      <button class="tab-btn" data-tab="recap" onclick="switchTab('recap')">
+        <span class="tab-icon">📊</span><span>Rekap</span>
       </button>
-
-
-      <button
-        class="tab-btn"
-        data-tab="cloud"
-        onclick="switchTab('cloud')"
-      >
-        <span class="tab-icon">☁️</span>
-        <span>Cloud</span>
+      <button class="tab-btn" data-tab="cloud" onclick="switchTab('cloud')">
+        <span class="tab-icon">☁️</span><span>Cloud</span>
       </button>
-
     </nav>
 
-
-    <!-- ==========================================
-         MAIN CONTENT
-         ========================================== -->
-
     <main class="main-content">
-
-
-      <!-- ========================================
-           INPUT TRANSAKSI
-           ======================================== -->
-
-      <section
-        id="input"
-        class="tab-content active"
-      >
-
-        <!-- EDIT MODE -->
-
-        <div
-          id="editModeBanner"
-          class="edit-mode-banner"
-          style="display:none;"
-        >
-
+      <section id="input" class="tab-content active">
+        <div id="editModeBanner" class="edit-mode-banner" style="display:none;">
           <div>
             <strong>✏️ Mode Edit</strong>
-
-            <p>
-              Ubah data transaksi kemudian
-              simpan perubahan.
-            </p>
+            <p>Ubah data transaksi kemudian simpan perubahan.</p>
           </div>
-
-          <button
-            class="btn btn-small"
-            onclick="cancelEdit()"
-          >
-            Batal
-          </button>
-
+          <button class="btn btn-small" onclick="cancelEdit()">Batal</button>
         </div>
-
-
-        <!-- FORM CARD -->
 
         <div class="form-section">
-
           <div class="section-heading">
-
             <div>
-              <span class="section-eyebrow">
-                KEUANGAN
-              </span>
-
-              <h2 id="formTitle">
-                Tambah Transaksi
-              </h2>
-
-              <p>
-                Catat pemasukan atau pengeluaran
-                Anda.
-              </p>
+              <span class="section-eyebrow">KEUANGAN</span>
+              <h2 id="formTitle">Tambah Transaksi</h2>
+              <p>Catat pemasukan atau pengeluaran Anda.</p>
             </div>
-
           </div>
 
-
-          <!-- FORM -->
-
           <div class="form-row">
-
             <div class="form-group">
-
-              <label for="type">
-                Tipe Transaksi
-              </label>
-
-              <select
-                id="type"
-                onchange="updateCategories()"
-              >
-
-                <option value="income">
-                  💰 Pemasukan
-                </option>
-
-                <option value="expense">
-                  💸 Pengeluaran
-                </option>
-
+              <label for="type">Tipe Transaksi</label>
+              <select id="type" onchange="updateCategories()">
+                <option value="income">💰 Pemasukan</option>
+                <option value="expense">💸 Pengeluaran</option>
               </select>
-
             </div>
-
-
             <div class="form-group">
-
-              <label for="category">
-                Kategori
-              </label>
-
+              <label for="category">Kategori</label>
               <select id="category"></select>
-
             </div>
-
           </div>
-
 
           <div class="form-row">
-
             <div class="form-group">
-
-              <label for="amount">
-                Jumlah
-              </label>
-
+              <label for="amount">Jumlah</label>
               <div class="input-money">
-
                 <span>Rp</span>
-
-                <input
-                  type="number"
-                  id="amount"
-                  placeholder="0"
-                  min="0"
-                  step="1000"
-                >
-
+                <input type="number" id="amount" placeholder="0" min="0" step="1000">
               </div>
-
             </div>
-
-
             <div class="form-group">
-
-              <label for="date">
-                Tanggal
-              </label>
-
-              <input
-                type="date"
-                id="date"
-              >
-
+              <label for="date">Tanggal</label>
+              <input type="date" id="date">
             </div>
-
           </div>
-
 
           <div class="form-group">
-
-            <label for="description">
-              Keterangan
-            </label>
-
-            <textarea
-              id="description"
-              placeholder="Contoh: Belanja kebutuhan rumah..."
-            ></textarea>
-
+            <label for="description">Keterangan</label>
+            <textarea id="description" placeholder="Contoh: Belanja kebutuhan rumah..."></textarea>
           </div>
 
-
-          <!-- LOADING -->
-
-          <div
-            id="transactionLoading"
-            class="loading"
-          >
-
-            <span class="spinner"></span>
-
-            Menyimpan transaksi...
-
+          <div id="transactionLoading" class="loading">
+            <span class="spinner"></span> Menyimpan transaksi...
           </div>
-
-
-          <!-- BUTTON -->
 
           <div class="form-actions">
-
-            <button
-              class="btn btn-primary btn-submit"
-              id="submitBtn"
-              onclick="addTransaction()"
-            >
-              <span>✓</span>
-              <span>Simpan Transaksi</span>
+            <button class="btn btn-primary btn-submit" id="submitBtn" onclick="addTransaction()">
+              <span>✓</span><span>Simpan Transaksi</span>
             </button>
-
-
-            <button
-              class="btn btn-secondary"
-              id="cancelBtn"
-              onclick="cancelEdit()"
-              style="display:none;"
-            >
-              Batal
-            </button>
-
+            <button class="btn btn-secondary" id="cancelBtn" onclick="cancelEdit()" style="display:none;">Batal</button>
           </div>
-
         </div>
-
       </section>
 
-
-
-      <!-- ========================================
-           RIWAYAT
-           ======================================== -->
-
-      <section
-        id="history"
-        class="tab-content"
-      >
-
+      <section id="history" class="tab-content">
         <div class="page-heading">
-
           <div>
-            <span class="section-eyebrow">
-              AKTIVITAS
-            </span>
-
+            <span class="section-eyebrow">AKTIVITAS</span>
             <h2>Riwayat Transaksi</h2>
-
-            <p>
-              Pantau aktivitas keuangan Anda.
-            </p>
+            <p>Pantau aktivitas keuangan Anda.</p>
           </div>
-
         </div>
-
-
-        <!-- TODAY STATS -->
-
-        <div
-          class="stats-grid"
-          id="todayStats"
-        ></div>
-
-
-        <!-- TRANSACTIONS -->
-
+        <div class="stats-grid" id="todayStats"></div>
         <div class="content-card">
-
           <div class="card-heading">
-
             <div>
-
               <h3>Transaksi Terbaru</h3>
-
-              <p>
-                Semua transaksi yang tersimpan.
-              </p>
-
+              <p>Semua transaksi yang tersimpan.</p>
             </div>
-
           </div>
-
-
-          <div
-            id="transactionList"
-            class="transaction-list"
-          ></div>
-
+          <div id="transactionList" class="transaction-list"></div>
         </div>
-
       </section>
 
-
-
-      <!-- ========================================
-           REKAP
-           ======================================== -->
-
-      <section
-        id="recap"
-        class="tab-content"
-      >
-
+      <section id="recap" class="tab-content">
         <div class="page-heading">
-
           <div>
-
-            <span class="section-eyebrow">
-              ANALISIS
-            </span>
-
+            <span class="section-eyebrow">ANALISIS</span>
             <h2>Rekap Bulanan</h2>
-
-            <p>
-              Lihat ringkasan keuangan berdasarkan
-              bulan.
-            </p>
-
+            <p>Lihat ringkasan keuangan dan export laporan Anda.</p>
           </div>
-
         </div>
 
+        <div class="content-card" style="margin-bottom:20px;">
+          <div class="card-heading">
+            <div>
+              <h3>📤 Export Laporan</h3>
+              <p>Pilih format laporan yang ingin Anda simpan.</p>
+            </div>
+          </div>
+          <div class="form-actions" style="display:flex;gap:12px;flex-wrap:wrap;">
+            <button class="btn btn-primary" type="button" onclick="exportRecapPDF()">📄 Export PDF</button>
+            <button class="btn btn-primary" type="button" onclick="exportRecapExcel()">📊 Export Excel</button>
+          </div>
+        </div>
 
-        <div
-          class="recap-grid"
-          id="recapGrid"
-        ></div>
-
+        <div class="recap-grid" id="recapGrid"></div>
       </section>
 
-
-
-      <!-- ========================================
-           CLOUD
-           ======================================== -->
-
-      <section
-        id="cloud"
-        class="tab-content"
-      >
-
+      <section id="cloud" class="tab-content">
         <div class="page-heading">
-
           <div>
-
-            <span class="section-eyebrow">
-              BACKUP & SYNC
-            </span>
-
+            <span class="section-eyebrow">BACKUP & SYNC</span>
             <h2>Cloud Storage</h2>
-
-            <p>
-              Simpan dan sinkronkan data Anda
-              secara online.
-            </p>
-
+            <p>Simpan dan sinkronkan data Anda secara online.</p>
           </div>
-
         </div>
-
-
         <div id="cloudPanel"></div>
-
       </section>
-
     </main>
 
-
-    <!-- ==========================================
-         FOOTER
-         ========================================== -->
-
     <footer class="app-footer">
-
-      <span>
-        Pembukuan App
-      </span>
-
-      <span class="footer-dot">
-        •
-      </span>
-
-      <span>
-        Data tersimpan dengan aman
-      </span>
-
+      <span>Pembukuan App</span><span class="footer-dot">•</span><span>Data tersimpan dengan aman</span>
     </footer>
-
   </div>
 
-
-  <!-- ==========================================
-       JAVASCRIPT
-       ========================================== -->
-
+  <!-- Library export: PDF + Excel -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="./app.js"></script>
 
-  <!-- ==========================================
-       EXPORT DATA
-       ========================================== -->
   <script>
-    async function exportDataFromApp() {
-      const credentials =
-        typeof getCloudCredentials === 'function'
-          ? getCloudCredentials()
-          : null;
+    function getExportTransactions() {
+      if (typeof getTransactions !== 'function') return [];
+      return getTransactions().slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    }
 
-      if (!credentials || !credentials.userId || !credentials.token) {
-        if (typeof showToast === 'function') {
-          showToast(
-            '❌ Silakan login cloud terlebih dahulu',
-            'error'
-          );
-        } else {
-          alert('Silakan login cloud terlebih dahulu.');
-        }
-        return;
-      }
+    function getExportSummary(transactions) {
+      return transactions.reduce((summary, t) => {
+        const amount = Number(t.amount) || 0;
+        if (t.type === 'income') summary.income += amount;
+        if (t.type === 'expense') summary.expense += amount;
+        return summary;
+      }, { income: 0, expense: 0 });
+    }
 
+    function formatExportRupiah(value) {
+      return new Intl.NumberFormat('id-ID', {
+        style: 'currency', currency: 'IDR', minimumFractionDigits: 0, maximumFractionDigits: 0
+      }).format(Number(value) || 0);
+    }
+
+    function getExportMonthData(transactions) {
+      const months = {};
+      transactions.forEach(t => {
+        const key = String(t.date || '').substring(0, 7) || 'Tanpa tanggal';
+        if (!months[key]) months[key] = { income: 0, expense: 0 };
+        const amount = Number(t.amount) || 0;
+        if (t.type === 'income') months[key].income += amount;
+        if (t.type === 'expense') months[key].expense += amount;
+      });
+      return Object.keys(months).sort().map(key => ({
+        month: key,
+        income: months[key].income,
+        expense: months[key].expense,
+        balance: months[key].income - months[key].expense
+      }));
+    }
+
+    function exportRecapPDF() {
       try {
-        if (typeof showToast === 'function') {
-          showToast('📦 Menyiapkan export data...', 'info');
-        }
+        const transactions = getExportTransactions();
+        const summary = getExportSummary(transactions);
+        const monthly = getExportMonthData(transactions);
+        const jsPDF = window.jspdf && window.jspdf.jsPDF;
+        if (!jsPDF) throw new Error('Library PDF belum siap. Refresh halaman lalu coba lagi.');
 
-        const response = await fetch(
-          `${API_BASE_URL}/api/export/${encodeURIComponent(credentials.userId)}`,
-          {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${credentials.token}`
-            }
-          }
-        );
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        const today = new Date().toLocaleDateString('id-ID', { dateStyle: 'long' });
+        doc.setFontSize(18);
+        doc.text('LAPORAN PEMBUKUAN', 14, 16);
+        doc.setFontSize(10);
+        doc.text('Tanggal export: ' + today, 14, 23);
+        doc.text('Total pemasukan: ' + formatExportRupiah(summary.income), 14, 30);
+        doc.text('Total pengeluaran: ' + formatExportRupiah(summary.expense), 95, 30);
+        doc.text('Saldo: ' + formatExportRupiah(summary.income - summary.expense), 190, 30);
 
-        if (!response.ok) {
-          let message = 'Export gagal';
+        doc.autoTable({
+          startY: 36,
+          head: [['Tanggal', 'Tipe', 'Kategori', 'Jumlah', 'Keterangan']],
+          body: transactions.map(t => [
+            t.date || '-',
+            t.type === 'income' ? 'Pemasukan' : 'Pengeluaran',
+            t.category || 'Lainnya',
+            formatExportRupiah(t.amount),
+            t.description || '-'
+          ]),
+          styles: { fontSize: 8 },
+          headStyles: { fontSize: 8 }
+        });
 
-          try {
-            const errorData = await response.json();
-            message = errorData.error || message;
-          } catch (_) {
-            // Response bukan JSON
-          }
+        const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : 50;
+        doc.setFontSize(12);
+        doc.text('Rekap Bulanan', 14, finalY);
+        doc.autoTable({
+          startY: finalY + 4,
+          head: [['Bulan', 'Pemasukan', 'Pengeluaran', 'Saldo']],
+          body: monthly.map(m => [
+            m.month,
+            formatExportRupiah(m.income),
+            formatExportRupiah(m.expense),
+            formatExportRupiah(m.balance)
+          ]),
+          styles: { fontSize: 8 }
+        });
 
-          throw new Error(message);
-        }
-
-        const blob = await response.blob();
-        const disposition = response.headers.get('Content-Disposition') || '';
-        const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
-        const filename = filenameMatch
-          ? filenameMatch[1]
-          : `pembukuan-export-${Date.now()}.json`;
-
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
-
-        if (typeof showToast === 'function') {
-          showToast('✅ Data berhasil diexport!', 'success');
-        }
+        doc.save('pembukuan-laporan-' + new Date().toISOString().slice(0, 10) + '.pdf');
+        if (typeof showToast === 'function') showToast('✅ Laporan PDF berhasil dibuat!', 'success');
       } catch (error) {
-        console.error('Export error:', error);
-
-        if (typeof showToast === 'function') {
-          showToast(`❌ ${error.message || 'Export gagal'}`, 'error');
-        } else {
-          alert(`Export gagal: ${error.message || 'Unknown error'}`);
-        }
+        console.error('PDF export error:', error);
+        if (typeof showToast === 'function') showToast('❌ Export PDF gagal: ' + error.message, 'error');
       }
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
-      const cloudPanel = document.getElementById('cloudPanel');
+    function exportRecapExcel() {
+      try {
+        if (!window.XLSX) throw new Error('Library Excel belum siap. Refresh halaman lalu coba lagi.');
+        const transactions = getExportTransactions();
+        const summary = getExportSummary(transactions);
+        const monthly = getExportMonthData(transactions);
 
-      if (!cloudPanel) return;
+        const summaryRows = [
+          ['LAPORAN PEMBUKUAN'],
+          ['Tanggal Export', new Date().toLocaleString('id-ID')],
+          [],
+          ['Total Pemasukan', summary.income],
+          ['Total Pengeluaran', summary.expense],
+          ['Saldo', summary.income - summary.expense],
+          ['Jumlah Transaksi', transactions.length]
+        ];
 
-      const observer = new MutationObserver(() => {
-        const actions = cloudPanel.querySelector('.cloud-actions');
+        const transactionRows = [
+          ['Tanggal', 'Tipe', 'Kategori', 'Jumlah', 'Keterangan'],
+          ...transactions.map(t => [
+            t.date || '',
+            t.type === 'income' ? 'Pemasukan' : 'Pengeluaran',
+            t.category || 'Lainnya',
+            Number(t.amount) || 0,
+            t.description || ''
+          ])
+        ];
 
-        if (!actions || actions.querySelector('#exportDataBtn')) {
-          return;
-        }
+        const monthlyRows = [
+          ['Bulan', 'Pemasukan', 'Pengeluaran', 'Saldo'],
+          ...monthly.map(m => [m.month, m.income, m.expense, m.balance])
+        ];
 
-        const exportButton = document.createElement('button');
-        exportButton.id = 'exportDataBtn';
-        exportButton.type = 'button';
-        exportButton.className = 'btn btn-primary';
-        exportButton.textContent = '📥 Export Data';
-        exportButton.onclick = exportDataFromApp;
-
-        actions.appendChild(exportButton);
-      });
-
-      observer.observe(cloudPanel, {
-        childList: true,
-        subtree: true
-      });
-
-      const actions = cloudPanel.querySelector('.cloud-actions');
-      if (actions && !actions.querySelector('#exportDataBtn')) {
-        const exportButton = document.createElement('button');
-        exportButton.id = 'exportDataBtn';
-        exportButton.type = 'button';
-        exportButton.className = 'btn btn-primary';
-        exportButton.textContent = '📥 Export Data';
-        exportButton.onclick = exportDataFromApp;
-        actions.appendChild(exportButton);
+        const wb = XLSX.utils.book_new();
+        const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+        const wsTransactions = XLSX.utils.aoa_to_sheet(transactionRows);
+        const wsMonthly = XLSX.utils.aoa_to_sheet(monthlyRows);
+        wsSummary['!cols'] = [{ wch: 24 }, { wch: 24 }];
+        wsTransactions['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 40 }];
+        wsMonthly['!cols'] = [{ wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 20 }];
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan');
+        XLSX.utils.book_append_sheet(wb, wsTransactions, 'Transaksi');
+        XLSX.utils.book_append_sheet(wb, wsMonthly, 'Rekap Bulanan');
+        XLSX.writeFile(wb, 'pembukuan-laporan-' + new Date().toISOString().slice(0, 10) + '.xlsx');
+        if (typeof showToast === 'function') showToast('✅ Laporan Excel berhasil dibuat!', 'success');
+      } catch (error) {
+        console.error('Excel export error:', error);
+        if (typeof showToast === 'function') showToast('❌ Export Excel gagal: ' + error.message, 'error');
       }
-    });
+    }
   </script>
-
 </body>
 </html>
