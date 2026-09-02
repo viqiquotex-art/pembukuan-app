@@ -76,8 +76,9 @@
               <label for="amount">Jumlah</label>
               <div class="input-money">
                 <span>Rp</span>
-                <input type="number" id="amount" placeholder="0" min="0" step="1000">
+                <input type="text" inputmode="numeric" id="amount" placeholder="0" autocomplete="off">
               </div>
+              <small style="margin-top:6px;color:#92969e;font-size:11px;">Contoh: 1.000.000</small>
             </div>
             <div class="form-group">
               <label for="date">Tanggal</label>
@@ -95,7 +96,7 @@
           </div>
 
           <div class="form-actions">
-            <button class="btn btn-primary btn-submit" id="submitBtn" onclick="addTransaction()">
+            <button class="btn btn-primary btn-submit" id="submitBtn" onclick="addTransactionFromInput()">
               <span>✓</span><span>Simpan Transaksi</span>
             </button>
             <button class="btn btn-secondary" id="cancelBtn" onclick="cancelEdit()" style="display:none;">Batal</button>
@@ -165,13 +166,102 @@
     </footer>
   </div>
 
-  <!-- Library export: PDF + Excel -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="./app.js"></script>
 
   <script>
+    // ==========================================
+    // NEXA INPUT FORMAT + AUTO CLOUD
+    // ==========================================
+
+    function formatNominalInput(value) {
+      const digits = String(value || '').replace(/\D/g, '');
+      if (!digits) return '';
+      return Number(digits).toLocaleString('id-ID');
+    }
+
+    function getNominalInputValue() {
+      const amountEl = document.getElementById('amount');
+      if (!amountEl) return 0;
+      const digits = amountEl.value.replace(/\D/g, '');
+      return Number(digits) || 0;
+    }
+
+    function addTransactionFromInput() {
+      const amountEl = document.getElementById('amount');
+      if (!amountEl) return;
+
+      const rawAmount = getNominalInputValue();
+      if (!rawAmount || rawAmount <= 0) {
+        if (typeof showToast === 'function') showToast('❌ Masukkan jumlah yang valid', 'error');
+        return;
+      }
+
+      // app.js membaca nilai amount dengan parseFloat().
+      // Simpan sementara angka murni agar data tetap numerik.
+      const formattedAmount = amountEl.value;
+      amountEl.value = String(rawAmount);
+
+      try {
+        addTransaction();
+      } finally {
+        // Jika form berhasil dikosongkan oleh app.js, biarkan kosong.
+        // Jika sedang mode edit atau terjadi error, kembalikan format tampilan.
+        if (amountEl.value && amountEl.value === String(rawAmount)) {
+          amountEl.value = formattedAmount;
+        }
+      }
+    }
+
+    function formatAmountField() {
+      const amountEl = document.getElementById('amount');
+      if (!amountEl) return;
+
+      const cursorEnd = amountEl.selectionStart === amountEl.value.length;
+      const formatted = formatNominalInput(amountEl.value);
+      amountEl.value = formatted;
+      if (cursorEnd) {
+        amountEl.setSelectionRange(amountEl.value.length, amountEl.value.length);
+      }
+    }
+
+    async function loadUserCloudAutomatically() {
+      if (typeof isCloudConnected !== 'function' || !isCloudConnected()) return;
+      if (typeof loadFromCloudToApp !== 'function') return;
+
+      const credentials = getCloudCredentials();
+      if (!credentials || !credentials.userId) return;
+
+      const userKey = `nexa_active_user_${credentials.userId}`;
+      const lastUser = localStorage.getItem('nexa_last_active_user');
+
+      // Saat user berbeda login, jangan campur data user sebelumnya.
+      if (lastUser !== credentials.userId) {
+        localStorage.setItem('transactions', '[]');
+        localStorage.setItem('nexa_last_active_user', credentials.userId);
+      }
+
+      await loadFromCloudToApp();
+      renderHistory();
+      renderRecap();
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const amountEl = document.getElementById('amount');
+      if (amountEl) {
+        amountEl.addEventListener('input', formatAmountField);
+        amountEl.addEventListener('blur', formatAmountField);
+      }
+
+      // Register/login menyimpan credentials terlebih dahulu.
+      // Begitu index terbuka, data user langsung dimuat dari cloud.
+      setTimeout(() => {
+        loadUserCloudAutomatically();
+      }, 150);
+    });
+
     function getExportTransactions() {
       if (typeof getTransactions !== 'function') return [];
       return getTransactions().slice().sort((a, b) => new Date(a.date) - new Date(b.date));
