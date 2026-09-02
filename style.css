@@ -69,6 +69,17 @@ button, input, select, textarea { font: inherit; }
 
 .tab-content {
   width: 100%;
+  display: none;
+}
+
+.tab-content.active {
+  display: block;
+  animation: tabFadeIn .18s ease;
+}
+
+@keyframes tabFadeIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* =========================================================
