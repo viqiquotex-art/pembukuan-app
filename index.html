@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Pembukuan App</title>
+  <title>NEXA — Asisten Pembukuan Keuangan</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -11,10 +11,10 @@
     <header class="header">
       <div class="header-left">
         <div class="app-brand">
-          <div class="app-icon">📊</div>
+          <div class="app-icon">N</div>
           <div>
-            <h1>Pembukuan</h1>
-            <p>Kelola keuangan dengan mudah</p>
+            <h1>NEXA</h1>
+            <p>Asisten Pembukuan Keuangan</p>
           </div>
         </div>
       </div>
@@ -161,7 +161,7 @@
     </main>
 
     <footer class="app-footer">
-      <span>Pembukuan App</span><span class="footer-dot">•</span><span>Data tersimpan dengan aman</span>
+      <span>NEXA</span><span class="footer-dot">•</span><span>Asisten Pembukuan Keuangan</span>
     </footer>
   </div>
 
@@ -220,15 +220,16 @@
         const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
         const today = new Date().toLocaleDateString('id-ID', { dateStyle: 'long' });
         doc.setFontSize(18);
-        doc.text('LAPORAN PEMBUKUAN', 14, 16);
+        doc.text('LAPORAN NEXA', 14, 16);
         doc.setFontSize(10);
-        doc.text('Tanggal export: ' + today, 14, 23);
-        doc.text('Total pemasukan: ' + formatExportRupiah(summary.income), 14, 30);
-        doc.text('Total pengeluaran: ' + formatExportRupiah(summary.expense), 95, 30);
-        doc.text('Saldo: ' + formatExportRupiah(summary.income - summary.expense), 190, 30);
+        doc.text('Asisten Pembukuan Keuangan', 14, 23);
+        doc.text('Tanggal export: ' + today, 14, 30);
+        doc.text('Total pemasukan: ' + formatExportRupiah(summary.income), 95, 30);
+        doc.text('Total pengeluaran: ' + formatExportRupiah(summary.expense), 190, 30);
+        doc.text('Saldo: ' + formatExportRupiah(summary.income - summary.expense), 14, 37);
 
         doc.autoTable({
-          startY: 36,
+          startY: 43,
           head: [['Tanggal', 'Tipe', 'Kategori', 'Jumlah', 'Keterangan']],
           body: transactions.map(t => [
             t.date || '-',
@@ -256,7 +257,7 @@
           styles: { fontSize: 8 }
         });
 
-        doc.save('pembukuan-laporan-' + new Date().toISOString().slice(0, 10) + '.pdf');
+        doc.save('nexa-laporan-' + new Date().toISOString().slice(0, 10) + '.pdf');
         if (typeof showToast === 'function') showToast('✅ Laporan PDF berhasil dibuat!', 'success');
       } catch (error) {
         console.error('PDF export error:', error);
@@ -272,7 +273,8 @@
         const monthly = getExportMonthData(transactions);
 
         const summaryRows = [
-          ['LAPORAN PEMBUKUAN'],
+          ['LAPORAN NEXA'],
+          ['Asisten Pembukuan Keuangan'],
           ['Tanggal Export', new Date().toLocaleString('id-ID')],
           [],
           ['Total Pemasukan', summary.income],
@@ -301,13 +303,13 @@
         const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
         const wsTransactions = XLSX.utils.aoa_to_sheet(transactionRows);
         const wsMonthly = XLSX.utils.aoa_to_sheet(monthlyRows);
-        wsSummary['!cols'] = [{ wch: 24 }, { wch: 24 }];
+        wsSummary['!cols'] = [{ wch: 28 }, { wch: 28 }];
         wsTransactions['!cols'] = [{ wch: 14 }, { wch: 18 }, { wch: 20 }, { wch: 18 }, { wch: 40 }];
         wsMonthly['!cols'] = [{ wch: 16 }, { wch: 20 }, { wch: 20 }, { wch: 20 }];
         XLSX.utils.book_append_sheet(wb, wsSummary, 'Ringkasan');
         XLSX.utils.book_append_sheet(wb, wsTransactions, 'Transaksi');
         XLSX.utils.book_append_sheet(wb, wsMonthly, 'Rekap Bulanan');
-        XLSX.writeFile(wb, 'pembukuan-laporan-' + new Date().toISOString().slice(0, 10) + '.xlsx');
+        XLSX.writeFile(wb, 'nexa-laporan-' + new Date().toISOString().slice(0, 10) + '.xlsx');
         if (typeof showToast === 'function') showToast('✅ Laporan Excel berhasil dibuat!', 'success');
       } catch (error) {
         console.error('Excel export error:', error);
