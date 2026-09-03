@@ -30,7 +30,7 @@ function adminAuthFetch(url, options = {}) {
 }
 
 function adminEscape(value) {
-  return String(value ?? '').replace(/[&<>\'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
+  return String(value ?? '').replace(/[&<>\'\"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 }
 
 function adminDate(value) {
@@ -60,6 +60,73 @@ function adminIsAuthorized() {
 }
 window.isAdminAuthorized = adminIsAuthorized;
 
+async function adminCheckConfig() {
+  const credentials = adminCredentials();
+  if (!credentials) {
+    alert('Sesi login belum tersedia. Silakan login terlebih dahulu.');
+    return;
+  }
+
+  const button = document.getElementById('adminConfigCheck');
+  if (button) {
+    button.disabled = true;
+    button.textContent = '⏳ Mengecek...';
+  }
+
+  try {
+    const response = await adminAuthFetch(`${ADMIN_API_URL}/api/admin/config-status`);
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      throw new Error('Sesi login tidak valid atau sudah kedaluwarsa.');
+    }
+    if (!response.ok) {
+      throw new Error(data.error || `Worker mengembalikan HTTP ${response.status}.`);
+    }
+
+    const adminState = data.adminConfigured ? '✅ TERSEDIA' : '❌ TIDAK TERSEDIA';
+    const kvState = data.kvConfigured ? '✅ TERSEDIA' : '❌ TIDAK TERSEDIA';
+
+    adminSetPanel(`
+      <div class="content-card">
+        <div class="admin-toolbar">
+          <div>
+            <h3>🔎 Diagnostik Worker</h3>
+            <p>Pengecekan aman konfigurasi runtime. Nilai rahasia tidak ditampilkan.</p>
+          </div>
+          <button class="btn btn-secondary" id="adminConfigBack" type="button">← Kembali</button>
+        </div>
+        <div class="admin-status ${data.adminConfigured && data.kvConfigured ? 'success' : 'error'}" style="margin-top:14px">
+          <strong>ADMIN_EMAIL: ${adminState}</strong><br>
+          <strong>PEMBUKUAN_KV: ${kvState}</strong>
+          <p style="margin:8px 0 0">Sesi login: ✅ terautentikasi</p>
+        </div>
+        <div style="margin-top:14px;opacity:.7;font-size:.9rem">Pengecekan: ${adminEscape(data.checkedAt || new Date().toISOString())}</div>
+      </div>
+    `);
+
+    document.getElementById('adminConfigBack')?.addEventListener('click', () => {
+      adminLoaded = false;
+      loadAdminPanel(true);
+    });
+  } catch (error) {
+    adminSetPanel(`
+      <div class="admin-status error">
+        <strong>❌ Diagnostik gagal</strong>
+        <p style="margin:8px 0 0">${adminEscape(error.message || 'Tidak dapat memeriksa Worker.')}</p>
+        <button class="btn btn-primary" type="button" style="margin-top:12px" id="adminConfigRetry">Coba Lagi</button>
+      </div>
+    `);
+    document.getElementById('adminConfigRetry')?.addEventListener('click', adminCheckConfig);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = '🔎 Cek Konfigurasi';
+    }
+  }
+}
+window.adminCheckConfig = adminCheckConfig;
+
 function adminRender() {
   const panel = document.getElementById('adminPanel');
   if (!panel) return;
@@ -80,9 +147,10 @@ function adminRender() {
   const total = adminUsers.length;
   const active = adminUsers.filter(user => adminIsRecentlyActive(user.lastLogin)).length;
   const recent = adminUsers.filter(user => { const t = Date.parse(user.createdAt || ''); return Number.isFinite(t) && t >= Date.now() - 7 * 24 * 60 * 60 * 1000; }).length;
-  panel.innerHTML = `<div class="admin-summary"><div class="admin-stat"><div class="label">Total Pengguna</div><div class="value">${total}</div></div><div class="admin-stat"><div class="label">Aktif 30 Hari</div><div class="value">${active}</div></div><div class="admin-stat"><div class="label">User Baru 7 Hari</div><div class="value">${recent}</div></div><div class="admin-stat"><div class="label">API</div><div class="value" id="adminApiState">ONLINE</div></div></div><div class="content-card"><div class="admin-toolbar"><div><h3>👥 Pengguna NEXA</h3><p>${filtered.length} dari ${total} pengguna ditampilkan</p></div><div class="admin-search"><input id="adminUserSearch" type="search" placeholder="Cari nama, email, atau ID..." value="${adminEscape(query)}"><button class="btn btn-secondary" id="adminClearSearch" type="button">Reset</button><button class="btn btn-primary" id="adminRefresh" type="button">↻ Refresh</button></div></div><div id="adminStatus" class="admin-status success" style="margin:14px 0">Admin terverifikasi • ${adminEscape(credentials.email || 'akun administrator')}</div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Pengguna</th><th>Email</th><th>Terdaftar</th><th>Login Terakhir</th><th>Role</th><th>Aksi</th></tr></thead><tbody id="adminUsersBody">${rows}</tbody></table></div></div>`;
+  panel.innerHTML = `<div class="admin-summary"><div class="admin-stat"><div class="label">Total Pengguna</div><div class="value">${total}</div></div><div class="admin-stat"><div class="label">Aktif 30 Hari</div><div class="value">${active}</div></div><div class="admin-stat"><div class="label">User Baru 7 Hari</div><div class="value">${recent}</div></div><div class="admin-stat"><div class="label">API</div><div class="value" id="adminApiState">ONLINE</div></div></div><div class="content-card"><div class="admin-toolbar"><div><h3>👥 Pengguna NEXA</h3><p>${filtered.length} dari ${total} pengguna ditampilkan</p></div><div class="admin-search"><input id="adminUserSearch" type="search" placeholder="Cari nama, email, atau ID..." value="${adminEscape(query)}"><button class="btn btn-secondary" id="adminClearSearch" type="button">Reset</button><button class="btn btn-secondary" id="adminConfigCheck" type="button">🔎 Cek Konfigurasi</button><button class="btn btn-primary" id="adminRefresh" type="button">↻ Refresh</button></div></div><div id="adminStatus" class="admin-status success" style="margin:14px 0">Admin terverifikasi • ${adminEscape(credentials.email || 'akun administrator')}</div><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Pengguna</th><th>Email</th><th>Terdaftar</th><th>Login Terakhir</th><th>Role</th><th>Aksi</th></tr></thead><tbody id="adminUsersBody">${rows}</tbody></table></div></div>`;
   document.getElementById('adminUserSearch')?.addEventListener('input', adminRender);
   document.getElementById('adminClearSearch')?.addEventListener('click', () => { const el = document.getElementById('adminUserSearch'); if (el) el.value = ''; adminRender(); });
+  document.getElementById('adminConfigCheck')?.addEventListener('click', adminCheckConfig);
   document.getElementById('adminRefresh')?.addEventListener('click', () => window.loadAdminPanel(true));
   panel.querySelectorAll('[data-admin-detail]').forEach(button => button.addEventListener('click', () => adminShowDetail(button.dataset.adminDetail)));
 }
