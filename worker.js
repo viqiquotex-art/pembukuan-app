@@ -141,6 +141,7 @@ async function handleGetProfile(request, env, corsHeaders) {
   try { const userId = await requireOwner(request, env); if (!userId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); const data = await env.PEMBUKUAN_KV.get(`user:${userId}`); if (!data) return jsonResponse({ error: 'User not found' }, 404, corsHeaders); const user = JSON.parse(data); return jsonResponse({ success: true, userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin }, 200, corsHeaders); }
   catch (error) { console.error('Profile error:', error); return jsonResponse({ error: 'Failed to get profile' }, 500, corsHeaders); }
 }
+
 async function handleGetUsers(request, env, corsHeaders) {
   try {
     const ownerId = await requireOwner(request, env); if (!ownerId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
@@ -183,90 +184,31 @@ function validateTransaction(transaction, fallbackTimestamp) {
   if (typeof transaction.category !== 'string' || transaction.category.trim().length < 1 || transaction.category.length > MAX_CATEGORY_LENGTH) return { valid: false, error: 'Invalid transaction category' };
   if (typeof transaction.amount !== 'number' || !Number.isFinite(transaction.amount) || transaction.amount <= 0 || transaction.amount > MAX_TRANSACTION_AMOUNT) return { valid: false, error: 'Transaction amount must be a valid positive number' };
   if (typeof transaction.date !== 'string' || !isValidDateOnly(transaction.date)) return { valid: false, error: 'Transaction date must be a valid YYYY-MM-DD date' };
-  if (transaction.description !== undefined && transaction.description !== null && (typeof transaction.description !== 'string' || transaction.description.length > MAX_DESCRIPTION_LENGTH)) return { valid: false, error: 'Transaction description is invalid or too long' };
-  if (transaction.createdAt !== undefined && (typeof transaction.createdAt !== 'string' || transaction.createdAt.length > 40 || Number.isNaN(Date.parse(transaction.createdAt)))) return { valid: false, error: 'Invalid createdAt timestamp' };
-  if (transaction.updatedAt !== undefined && (typeof transaction.updatedAt !== 'string' || transaction.updatedAt.length > 40 || Number.isNaN(Date.parse(transaction.updatedAt)))) return { valid: false, error: 'Invalid updatedAt timestamp' };
-  if (!transaction.updatedAt) transaction.updatedAt = transaction.createdAt || fallbackTimestamp;
-  if (!transaction.createdAt) transaction.createdAt = transaction.updatedAt || fallbackTimestamp;
+  if (transaction.description !== undefined && transaction.description !== null && (typeof transaction.description !== 'string' || transaction.description.length > MAX_DESCRIPTION_LENGTH)) return { valid: false, error: 'Invalid transaction description' };
   return { valid: true };
 }
-function isValidDateOnly(value) { if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const [year, month, day] = value.split('-').map(Number); const date = new Date(Date.UTC(year, month - 1, day)); return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day; }
 
-async function migrateLegacyTransactions(userId, env, deletedIds) {
-  const legacyKey = `${LEGACY_TRANSACTIONS_PREFIX}${userId}`;
-  const legacyRaw = await env.PEMBUKUAN_KV.get(legacyKey);
-  if (!legacyRaw) return 0;
-  let legacy = []; try { legacy = JSON.parse(legacyRaw); } catch { legacy = []; }
-  if (!Array.isArray(legacy)) legacy = [];
-  let migrated = 0;
-  for (const tx of legacy) {
-    if (!tx || !tx.id || deletedIds.has(tx.id)) continue;
-    const validation = validateTransaction(tx, new Date().toISOString()); if (!validation.valid) continue;
-    const key = transactionKey(userId, tx.id); const existingRaw = await env.PEMBUKUAN_KV.get(key);
-    let shouldWrite = true; if (existingRaw) { try { shouldWrite = getTimestamp(tx) >= getTimestamp(JSON.parse(existingRaw)); } catch {} }
-    if (shouldWrite) { await env.PEMBUKUAN_KV.put(key, JSON.stringify(tx)); migrated += 1; }
-  }
-  await env.PEMBUKUAN_KV.delete(legacyKey);
-  return migrated;
-}
+function isValidDateOnly(value) { if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const date = new Date(`${value}T00:00:00Z`); return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value; }
 function transactionKey(userId, transactionId) { return `${TX_PREFIX}${userId}:${transactionId}`; }
-async function listTransactions(userId, env, deletedIds = null) {
-  const deletedSet = deletedIds || new Set(await getDeletedIds(userId, env));
-  const transactions = []; let cursor;
-  do {
-    const page = await env.PEMBUKUAN_KV.list({ prefix: `${TX_PREFIX}${userId}:`, cursor });
-    for (const key of page.keys) { const raw = await env.PEMBUKUAN_KV.get(key.name); if (!raw) continue; try { const tx = JSON.parse(raw); if (tx?.id && !deletedSet.has(tx.id)) transactions.push(tx); } catch {} }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  transactions.sort((a, b) => { const dateDiff = new Date(b.date) - new Date(a.date); return dateDiff || getTimestamp(b) - getTimestamp(a); });
-  return transactions;
-}
-
-async function handleGetTransactions(userId, request, env, corsHeaders) {
-  try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: cannot access other user data' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); return jsonResponse({ success: true, userId, transactions, count: transactions.length, deletedIds: Array.from(deletedIds) }, 200, corsHeaders); }
-  catch (error) { console.error('Get transactions error:', error); return jsonResponse({ error: 'Failed to get transactions' }, 500, corsHeaders); }
-}
-async function handleDeleteTransaction(userId, transactionId, request, env, corsHeaders) {
-  try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); if (typeof transactionId !== 'string' || transactionId.length < 1 || transactionId.length > MAX_TRANSACTION_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(transactionId)) return jsonResponse({ error: 'Invalid transaction ID' }, 400, corsHeaders); const deletedAt = new Date().toISOString(); await env.PEMBUKUAN_KV.put(`${DELETED_PREFIX}${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt })); await env.PEMBUKUAN_KV.delete(transactionKey(userId, transactionId)); await env.PEMBUKUAN_KV.delete(`${LEGACY_TRANSACTIONS_PREFIX}${userId}`); return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders); }
-  catch (error) { console.error('Delete transaction error:', error); return jsonResponse({ error: 'Failed to delete transaction' }, 500, corsHeaders); }
-}
+async function listTransactions(userId, env, deletedIds = new Set()) { const transactions = []; let cursor; do { const page = await env.PEMBUKUAN_KV.list({ prefix: `${TX_PREFIX}${userId}:`, cursor }); for (const key of page.keys) { if (deletedIds.has(key.name.slice(`${TX_PREFIX}${userId}:`.length))) continue; const raw = await env.PEMBUKUAN_KV.get(key.name); if (!raw) continue; try { const transaction = JSON.parse(raw); if (validateTransaction(transaction, new Date().toISOString()).valid) transactions.push(transaction); } catch {} } cursor = page.list_complete ? undefined : page.cursor; } while (cursor); transactions.sort((a, b) => { const dateDiff = new Date(b.date) - new Date(a.date); return dateDiff || getTimestamp(b) - getTimestamp(a); }); return transactions; }
+async function migrateLegacyTransactions(userId, env, deletedIds = new Set()) { const key = `${LEGACY_TRANSACTIONS_PREFIX}${userId}`; const raw = await env.PEMBUKUAN_KV.get(key); if (!raw) return; try { const legacy = JSON.parse(raw); if (!Array.isArray(legacy)) return; for (const transaction of legacy) { if (!validateTransaction(transaction, new Date().toISOString()).valid || deletedIds.has(transaction.id)) continue; const target = transactionKey(userId, transaction.id); if (!(await env.PEMBUKUAN_KV.get(target))) await env.PEMBUKUAN_KV.put(target, JSON.stringify(transaction)); } await env.PEMBUKUAN_KV.delete(key); } catch {} }
+async function handleGetTransactions(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: cannot access other user data' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); return jsonResponse({ success: true, userId, transactions, count: transactions.length, deletedIds: Array.from(deletedIds) }, 200, corsHeaders); } catch (error) { console.error('Get transactions error:', error); return jsonResponse({ error: 'Failed to get transactions' }, 500, corsHeaders); } }
+async function handleDeleteTransaction(userId, transactionId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); if (typeof transactionId !== 'string' || transactionId.length < 1 || transactionId.length > MAX_TRANSACTION_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(transactionId)) return jsonResponse({ error: 'Invalid transaction ID' }, 400, corsHeaders); const deletedAt = new Date().toISOString(); await env.PEMBUKUAN_KV.put(`${DELETED_PREFIX}${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt })); await env.PEMBUKUAN_KV.delete(transactionKey(userId, transactionId)); await env.PEMBUKUAN_KV.delete(`${LEGACY_TRANSACTIONS_PREFIX}${userId}`); return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders); } catch (error) { console.error('Delete transaction error:', error); return jsonResponse({ error: 'Failed to delete transaction' }, 500, corsHeaders); } }
 async function getDeletedIds(userId, env) { const ids = []; let cursor; do { const page = await env.PEMBUKUAN_KV.list({ prefix: `${DELETED_PREFIX}${userId}:`, cursor }); for (const key of page.keys) ids.push(key.name.slice(`${DELETED_PREFIX}${userId}:`.length)); cursor = page.list_complete ? undefined : page.cursor; } while (cursor); return ids; }
-
-async function handleGetStats(userId, request, env, corsHeaders) {
-  try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0); const expense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0); const stats = { totalIncome: income, totalExpense: expense, balance: income - expense, transactionCount: transactions.length }; return jsonResponse({ success: true, userId, stats, ...stats }, 200, corsHeaders); }
-  catch (error) { console.error('Stats error:', error); return jsonResponse({ error: 'Failed to get stats' }, 500, corsHeaders); }
-}
-async function handleExport(userId, request, env, corsHeaders) {
-  try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); return jsonResponse({ success: true, userId, transactions, count: transactions.length }, 200, corsHeaders); }
-  catch (error) { console.error('Export error:', error); return jsonResponse({ error: 'Failed to export data' }, 500, corsHeaders); }
-}
-
+async function handleGetStats(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0); const expense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0); const stats = { totalIncome: income, totalExpense: expense, balance: income - expense, transactionCount: transactions.length }; return jsonResponse({ success: true, userId, stats, ...stats }, 200, corsHeaders); } catch (error) { console.error('Stats error:', error); return jsonResponse({ error: 'Failed to get stats' }, 500, corsHeaders); } }
+async function handleExport(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); return jsonResponse({ success: true, userId, transactions, count: transactions.length }, 200, corsHeaders); } catch (error) { console.error('Export error:', error); return jsonResponse({ error: 'Failed to export data' }, 500, corsHeaders); } }
 async function createSession(kv, token, userId) { await kv.put(`session:${token}`, JSON.stringify({ userId, createdAt: new Date().toISOString() }), { expirationTtl: SESSION_TTL_SECONDS }); }
 async function getTokenOwner(token, kv) { if (!token || !kv) return null; const raw = await kv.get(`session:${token}`); if (!raw) return null; try { const session = JSON.parse(raw); return typeof session.userId === 'string' ? session.userId : null; } catch { return null; } }
 function requireOwner(request, env) { return getTokenOwner(getAuthToken(request), env.PEMBUKUAN_KV); }
 function getAuthToken(request) { const authHeader = request.headers.get('Authorization') || ''; if (authHeader.startsWith('Bearer ')) return authHeader.slice(7).trim(); return getCookie(request, SESSION_COOKIE); }
-
-async function hashPassword(password) {
-  const saltBytes = crypto.getRandomValues(new Uint8Array(16));
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256);
-  return { hash: bytesToBase64(new Uint8Array(bits)), salt: bytesToBase64(saltBytes) };
-}
-async function verifyPassword(password, encodedHash, encodedSalt) {
-  try { const salt = base64ToBytes(encodedSalt); const expected = base64ToBytes(encodedHash); const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256); return constantTimeEqual(new Uint8Array(bits), expected); } catch { return false; }
-}
+async function hashPassword(password) { const saltBytes = crypto.getRandomValues(new Uint8Array(16)); const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256); return { hash: bytesToBase64(new Uint8Array(bits)), salt: bytesToBase64(saltBytes) }; }
+async function verifyPassword(password, encodedHash, encodedSalt) { try { const salt = base64ToBytes(encodedSalt); const expected = base64ToBytes(encodedHash); const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256); return constantTimeEqual(new Uint8Array(bits), expected); } catch { return false; } }
 function constantTimeEqual(a, b) { if (a.length !== b.length) return false; let result = 0; for (let i = 0; i < a.length; i++) result |= a[i] ^ b[i]; return result === 0; }
 function encodeLegacyPassword(password) { return btoa(unescape(encodeURIComponent(password + LEGACY_PASSWORD_SUFFIX))); }
 function bytesToBase64(bytes) { let binary = ''; const chunk = 0x8000; for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk)); return btoa(binary); }
 function base64ToBytes(value) { const binary = atob(value); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return bytes; }
-
 function getTimestamp(transaction) { const value = transaction && (transaction.updatedAt || transaction.createdAt); const timestamp = value ? Date.parse(value) : 0; return Number.isFinite(timestamp) ? timestamp : 0; }
-function getCorsHeaders(request, env) {
-  const requestOrigin = request.headers.get('Origin'); const allowedOrigins = getAllowedOrigins(env);
-  const headers = { 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Max-Age': '86400', 'Content-Type': 'application/json', 'Vary': 'Origin', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Content-Security-Policy': "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://pembukuan-app.viqiquotex.workers.dev; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'", 'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()' };
-  if (requestOrigin && allowedOrigins.includes(requestOrigin)) headers['Access-Control-Allow-Origin'] = requestOrigin;
-  return headers;
-}
+function getCorsHeaders(request, env) { const requestOrigin = request.headers.get('Origin'); const allowedOrigins = getAllowedOrigins(env); const headers = { 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Max-Age': '86400', 'Content-Type': 'application/json', 'Vary': 'Origin', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Content-Security-Policy': "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://pembukuan-app.viqiquotex.workers.dev; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';", 'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()' }; if (requestOrigin && allowedOrigins.includes(requestOrigin)) headers['Access-Control-Allow-Origin'] = requestOrigin; return headers; }
 function withCookie(headers, cookie) { return cookie ? { ...headers, 'Set-Cookie': cookie } : headers; }
 function buildSessionCookie(token) { return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${SESSION_TTL_SECONDS}`; }
 function clearSessionCookie() { return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0`; }
