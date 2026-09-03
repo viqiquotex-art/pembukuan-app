@@ -1,9 +1,13 @@
 // ==========================================
-// NEXA - RELIABLE TRANSACTION DELETE SYNC
-// Single owner of transaction deletion
+// NEXA - RELIABLE TRANSACTION SYNC
+// Single owner of delete + auto-sync orchestration
 // ==========================================
 
 (function () {
+  let autoSyncTimer = null;
+  let autoSyncRunning = false;
+  let autoSyncQueued = false;
+
   async function deleteTransaction(id) {
     if (!confirm('Yakin hapus transaksi ini?')) return;
 
@@ -16,11 +20,11 @@
       return;
     }
 
-    if (typeof addLocalDeletedTransactionId === 'function') {
-      addLocalDeletedTransactionId(id);
-    }
+    if (typeof addLocalDeletedTransactionId === 'function') addLocalDeletedTransactionId(id);
 
-    saveTransactions(transactions.filter(t => t && t.id !== id));
+    if (typeof saveTransactions === 'function') {
+      saveTransactions(transactions.filter(t => t && t.id !== id));
+    }
     if (typeof renderHistory === 'function') renderHistory();
     if (typeof renderRecap === 'function') renderRecap();
 
@@ -31,14 +35,20 @@
 
     try {
       showToast('☁️ Menghapus transaksi dari cloud...', 'info');
-      const response = await fetch(
-        `${API_BASE_URL}/api/transactions/${encodeURIComponent(credentials.userId)}/${encodeURIComponent(id)}`,
-        { method: 'DELETE', credentials: 'include' }
-      );
-      const data = await response.json().catch(() => ({}));
+      const url = `${API_BASE_URL}/api/transactions/${encodeURIComponent(credentials.userId)}/${encodeURIComponent(id)}`;
+      const response = typeof authFetch === 'function'
+        ? await authFetch(url, { method: 'DELETE' })
+        : await fetch(url, { method: 'DELETE', credentials: 'include' });
+      const data = typeof safeJson === 'function' ? await safeJson(response) : await response.json().catch(() => ({}));
 
       if (response.status === 401) {
-        showToast('⚠️ Session cloud sudah berakhir. Data tetap tersimpan lokal.', 'error');
+        if (typeof handleAuthFailure === 'function') handleAuthFailure(data.error);
+        else showToast('⚠️ Session cloud sudah berakhir. Data tetap tersimpan lokal.', 'error');
+        return;
+      }
+
+      if (response.status === 403) {
+        showToast('❌ Akses cloud ditolak. Data lokal tetap aman.', 'error');
         return;
       }
 
@@ -53,7 +63,27 @@
     }
   }
 
-  // Delete is intentionally owned by sync.js because local deletion must
-  // always register a tombstone before attempting the cloud deletion.
+  function autoSyncToCloud() {
+    if (typeof isCloudConnected !== 'function' || !isCloudConnected()) return;
+    clearTimeout(autoSyncTimer);
+    autoSyncTimer = setTimeout(async () => {
+      if (autoSyncRunning) {
+        autoSyncQueued = true;
+        return;
+      }
+      autoSyncRunning = true;
+      try {
+        if (typeof syncToCloud === 'function') await syncToCloud();
+      } finally {
+        autoSyncRunning = false;
+        if (autoSyncQueued) {
+          autoSyncQueued = false;
+          autoSyncToCloud();
+        }
+      }
+    }, 700);
+  }
+
   window.deleteTransaction = deleteTransaction;
+  window.autoSyncToCloud = autoSyncToCloud;
 })();
