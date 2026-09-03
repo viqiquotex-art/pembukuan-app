@@ -46,8 +46,9 @@ function authFetch(url, options = {}) {
   return fetch(url, { ...options, headers, credentials: 'include' });
 }
 function parseLocalTransactions() { try { const raw = localStorage.getItem('transactions'); const parsed = raw ? JSON.parse(raw) : []; return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
-function getLocalDeletedTransactionIds() { try { const raw = localStorage.getItem('deletedTransactionIds'); const ids = raw ? JSON.parse(raw) : []; return new Set(Array.isArray(ids) ? ids.filter(Boolean) : []); } catch { return new Set(); } }
-function saveLocalDeletedTransactionIds(ids) { localStorage.setItem('deletedTransactionIds', JSON.stringify(Array.from(ids))); }
+function getDeletedTransactionStorageKey() { const userId = localStorage.getItem('cloud_userId'); return userId ? `deletedTransactionIds:${userId}` : 'deletedTransactionIds'; }
+function getLocalDeletedTransactionIds() { try { const raw = localStorage.getItem(getDeletedTransactionStorageKey()); const ids = raw ? JSON.parse(raw) : []; return new Set(Array.isArray(ids) ? ids.filter(Boolean) : []); } catch { return new Set(); } }
+function saveLocalDeletedTransactionIds(ids) { localStorage.setItem(getDeletedTransactionStorageKey(), JSON.stringify(Array.from(ids))); }
 function addLocalDeletedTransactionId(id) { if (!id) return; const ids = getLocalDeletedTransactionIds(); ids.add(id); saveLocalDeletedTransactionIds(ids); }
 function removeLocalDeletedTransactionIds(idsToRemove) { if (!Array.isArray(idsToRemove) || !idsToRemove.length) return; const ids = getLocalDeletedTransactionIds(); idsToRemove.forEach(id => ids.delete(id)); saveLocalDeletedTransactionIds(ids); }
 function readSyncSnapshot(userId) { try { const raw = localStorage.getItem(SYNC_SNAPSHOT_KEY); const snapshot = raw ? JSON.parse(raw) : null; return snapshot && snapshot.userId === userId && Array.isArray(snapshot.transactions) ? snapshot.transactions : []; } catch { return []; } }
