@@ -55,11 +55,11 @@ async function handleRegister(request, env, corsHeaders) {
     const { email, password, name } = body || {};
     if (!email || !password || !name) return jsonResponse({ error: 'Missing required fields: email, password, name' }, 400, corsHeaders);
     if (!isValidEmail(email)) return jsonResponse({ error: 'Invalid email format' }, 400, corsHeaders);
-    if (typeof password !== 'string' || password.length < 6) return jsonResponse({ error: 'Password must be at least 6 characters' }, 400, corsHeaders);
+    if (typeof password !== 'string' || password.length < 8) return jsonResponse({ error: 'Password must be at least 8 characters' }, 400, corsHeaders);
     if (typeof name !== 'string' || name.trim().length < 2) return jsonResponse({ error: 'Name must be at least 2 characters' }, 400, corsHeaders);
 
     const kv = env.PEMBUKUAN_KV;
-    if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
+    if (!kv) throw new Error('PEMBUAN_KV binding is not configured');
 
     const normalizedEmail = email.trim().toLowerCase();
     const rate = await checkRateLimit(kv, `register:${normalizedEmail}`, REGISTER_MAX_ATTEMPTS, REGISTER_WINDOW_SECONDS);
