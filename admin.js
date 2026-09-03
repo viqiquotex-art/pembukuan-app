@@ -1,244 +1,110 @@
 // ==========================================
-// NEXA ADMIN PANEL - INTEGRATED MODULE
-// Runs inside index.html. Backend remains the security boundary.
+// PEMBUKUAN APP - PRODUCTION ADMIN DASHBOARD
+// Frontend analytics built from protected Worker data.
+// Backend remains the security boundary.
 // ==========================================
 
 const ADMIN_API_URL = 'https://pembukuan-app.viqiquotex.workers.dev';
+const ADMIN_PAGE_SIZES = [10, 25, 50, 100];
 let adminUsers = [];
 let adminLoaded = false;
 let adminLoading = false;
+let adminPage = 1;
+let adminPageSize = 10;
+let adminRoleFilter = 'all';
+let adminStatusFilter = 'all';
+let adminSort = 'newest';
+let adminRange = 30;
 
 function adminInjectStyles() {
-  if (document.getElementById('nexaAdminProfessionalStyles')) return;
+  if (document.getElementById('productionAdminStyles')) return;
   const style = document.createElement('style');
-  style.id = 'nexaAdminProfessionalStyles';
+  style.id = 'productionAdminStyles';
   style.textContent = `
-    .admin-shell { min-width:0; width:100%; }
-    .admin-hero { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:24px; border:1px solid rgba(225,226,235,.88); border-radius:20px; background:linear-gradient(135deg,#fff 0%,#f8f8ff 100%); box-shadow:0 12px 32px rgba(37,39,75,.065); }
-    .admin-hero h2 { margin:5px 0 5px; letter-spacing:-.8px; }
-    .admin-hero p { margin:0; color:#737789; font-size:12px; }
-    .admin-kicker { display:inline-block; color:#5b5ce2; font-size:9px; font-weight:800; letter-spacing:1.35px; }
-    .admin-live { display:flex; align-items:center; gap:10px; padding:10px 13px; border:1px solid rgba(69,168,107,.16); border-radius:14px; background:rgba(69,168,107,.07); white-space:nowrap; }
-    .admin-live-dot { width:8px; height:8px; border-radius:50%; background:#45a86b; box-shadow:0 0 0 4px rgba(69,168,107,.10); }
-    .admin-live strong,.admin-live small { display:block; }
-    .admin-live strong { font-size:11px; }
-    .admin-live small { margin-top:2px; color:#737789; font-size:9px; }
-    .admin-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
-    .admin-stat { min-width:0; padding:18px; border:1px solid rgba(225,226,235,.9); border-radius:17px; background:#fff; box-shadow:0 9px 25px rgba(37,39,75,.055); }
-    .admin-stat .label { color:#737789; font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
-    .admin-stat .value { margin-top:6px; font-size:25px; font-weight:800; letter-spacing:-.7px; }
-    .admin-stat .stat-foot { margin-top:4px; color:#9699a8; font-size:9px; }
-    .admin-stat-online .value { color:#45a86b; font-size:18px; letter-spacing:0; }
-    .admin-users-card { min-width:0; overflow:hidden; }
-    .admin-users-card .admin-toolbar { align-items:flex-start; }
-    .admin-search { min-width:0; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
-    .admin-search input { min-width:220px; }
-    .admin-user-list { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
-    .admin-user-card { min-width:0; padding:16px; border:1px solid rgba(127,127,127,.13); border-radius:16px; background:linear-gradient(180deg,#fff 0%,#fafaff 100%); transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease; }
-    .admin-user-card:hover { transform:translateY(-2px); box-shadow:0 10px 24px rgba(37,39,75,.08); border-color:rgba(91,92,226,.18); }
-    .admin-user-main { display:flex; align-items:center; gap:11px; min-width:0; }
-    .admin-avatar { flex:0 0 40px; width:40px; height:40px; display:grid; place-items:center; border-radius:13px; background:linear-gradient(145deg,#8586ff,#5556dc); color:#fff; font-weight:800; box-shadow:0 7px 16px rgba(91,92,226,.18); }
-    .admin-user-identity { min-width:0; flex:1; }
-    .admin-user-identity .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:800; }
-    .admin-user-identity .sub { margin-top:3px; overflow-wrap:anywhere; color:#737789; font-size:10px; }
-    .admin-badge { flex:0 0 auto; display:inline-flex; padding:5px 9px; border-radius:999px; background:rgba(127,127,127,.10); font-size:9px; font-weight:800; }
-    .admin-badge.admin { background:rgba(69,168,107,.13); color:#2d8a55; }
-    .admin-user-meta { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:14px; padding-top:12px; border-top:1px solid rgba(127,127,127,.09); }
-    .admin-user-meta div { min-width:0; }
-    .admin-user-meta span,.admin-user-meta strong { display:block; }
-    .admin-user-meta span { color:#9699a8; font-size:8px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
-    .admin-user-meta strong { margin-top:3px; overflow-wrap:anywhere; font-size:10px; }
-    .is-active { color:#2d8a55 !important; }
-    .is-idle { color:#8c8f9d !important; }
-    .admin-user-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:13px; }
-    .admin-id { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#9a9eac; font-size:8px; }
-    .admin-user-footer .btn { flex:0 0 auto; }
-    .admin-empty { padding:38px 15px; text-align:center; color:#737789; }
-    .admin-empty-icon { margin-bottom:8px; font-size:27px; opacity:.55; }
-    .admin-empty strong { display:block; color:#303243; font-size:13px; }
-    .admin-empty p { margin:5px 0 0; font-size:10px; }
-    .admin-loading { display:grid; justify-items:center; gap:7px; padding:45px 15px; color:#737789; font-size:11px; }
-    .admin-loading strong { color:#303243; }
-    .admin-loading-ring { width:25px; height:25px; border:3px solid rgba(91,92,226,.14); border-top-color:#5b5ce2; border-radius:50%; animation:adminSpin .8s linear infinite; }
-    @keyframes adminSpin { to { transform:rotate(360deg); } }
-    .admin-detail-view { min-width:0; }
-    .admin-detail-head { padding:22px; border:1px solid rgba(225,226,235,.9); border-radius:20px; background:linear-gradient(135deg,#fff,#f8f8ff); box-shadow:0 12px 32px rgba(37,39,75,.065); }
-    .admin-detail-head h2 { margin:8px 0 3px; overflow-wrap:anywhere; letter-spacing:-.7px; }
-    .admin-detail-head p { margin:0; overflow-wrap:anywhere; color:#737789; font-size:11px; }
-    .admin-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px; }
-    .admin-detail-item { min-width:0; padding:15px; border:1px solid rgba(225,226,235,.9); border-radius:14px; background:#fff; }
-    .admin-detail-item small { display:block; color:#9699a8; font-size:8px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; }
-    .admin-detail-item strong { display:block; margin-top:5px; overflow-wrap:anywhere; font-size:11px; }
-    .break-anywhere { word-break:break-all; }
-    @media (max-width:760px) {
-      .admin-hero { align-items:flex-start; flex-direction:column; padding:18px; border-radius:18px; }
-      .admin-live { width:100%; box-sizing:border-box; }
-      .admin-summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-      .admin-stat { padding:14px; border-radius:14px; }
-      .admin-stat .value { font-size:21px; }
-      .admin-stat-online .value { font-size:16px; }
-      .admin-users-card { padding:16px !important; }
-      .admin-search { width:100%; display:grid; grid-template-columns:1fr 1fr; }
-      .admin-search input { width:100%; min-width:0; grid-column:1 / -1; box-sizing:border-box; }
-      .admin-search .btn { width:100%; min-width:0; padding-left:8px; padding-right:8px; }
-      .admin-user-list { grid-template-columns:1fr; gap:10px; }
-      .admin-user-card { padding:14px; border-radius:15px; }
-      .admin-user-meta { grid-template-columns:1fr; }
-      .admin-user-footer { align-items:flex-end; }
-      .admin-id { max-width:52%; }
-      .admin-detail-head { padding:18px; }
-      .admin-detail-grid { grid-template-columns:1fr; }
-      .admin-status { overflow-wrap:anywhere; }
-    }
-    @media (max-width:420px) {
-      .admin-summary { gap:7px; }
-      .admin-stat { padding:12px; }
-      .admin-stat .label { font-size:8px; }
-      .admin-stat .value { font-size:19px; }
-      .admin-search { grid-template-columns:1fr; }
-      .admin-user-main { align-items:flex-start; }
-      .admin-badge { font-size:8px; }
-      .admin-user-footer { flex-direction:column; align-items:stretch; }
-      .admin-id { max-width:100%; }
-      .admin-user-footer .btn { width:100%; }
-    }
+    .pa-shell{display:grid;gap:14px;min-width:0}
+    .pa-hero,.pa-card{min-width:0;border:1px solid rgba(225,226,235,.9);background:#fff;border-radius:20px;box-shadow:0 10px 28px rgba(37,39,75,.055)}
+    .pa-hero{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:24px;background:linear-gradient(135deg,#fff,#f8f8ff)}
+    .pa-kicker{font-size:9px;font-weight:800;letter-spacing:1.3px;color:#5b5ce2}
+    .pa-hero h2{margin:5px 0;letter-spacing:-.8px}.pa-hero p{margin:0;color:#737789;font-size:11px}
+    .pa-live{display:flex;align-items:center;gap:9px;padding:10px 13px;border-radius:14px;background:rgba(69,168,107,.07);white-space:nowrap}.pa-dot{width:8px;height:8px;border-radius:50%;background:#45a86b;box-shadow:0 0 0 4px rgba(69,168,107,.1)}
+    .pa-live strong,.pa-live small{display:block}.pa-live strong{font-size:11px}.pa-live small{margin-top:2px;color:#737789;font-size:9px}
+    .pa-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.pa-kpi{padding:16px;border:1px solid rgba(225,226,235,.9);border-radius:16px;background:#fff}.pa-kpi span{display:block;color:#737789;font-size:8px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.pa-kpi strong{display:block;margin-top:6px;font-size:24px;letter-spacing:-.7px}.pa-kpi small{display:block;margin-top:4px;color:#9699a8;font-size:9px}
+    .pa-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:14px}.pa-card{padding:18px}.pa-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}.pa-head h3{margin:4px 0 0;font-size:15px}.pa-head p{margin:4px 0 0;color:#737789;font-size:10px}.pa-select{height:34px;padding:0 9px;border:1px solid rgba(127,127,127,.16);border-radius:10px;background:#fff;font-size:10px}
+    .pa-chart{height:210px;position:relative;min-width:0}.pa-chart svg{width:100%;height:100%;overflow:visible}.pa-chart-grid{stroke:rgba(127,127,127,.12);stroke-width:1}.pa-chart-line{fill:none;stroke:#5b5ce2;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.pa-chart-area{fill:rgba(91,92,226,.08)}.pa-chart-dot{fill:#fff;stroke:#5b5ce2;stroke-width:2}.pa-axis{fill:#9699a8;font-size:8px}.pa-empty-chart{display:grid;place-items:center;height:100%;color:#9699a8;font-size:10px}
+    .pa-toolbar{display:grid;grid-template-columns:minmax(180px,1fr) auto auto auto auto;gap:8px;align-items:center}.pa-toolbar input,.pa-toolbar select{min-width:0;height:38px;box-sizing:border-box;padding:0 11px;border:1px solid rgba(127,127,127,.16);border-radius:11px;background:#fff;font-size:10px}.pa-actions{display:flex;gap:7px;flex-wrap:wrap}.pa-btn{height:38px;padding:0 12px;border:1px solid rgba(127,127,127,.15);border-radius:11px;background:#fff;font-size:10px;font-weight:700;cursor:pointer}.pa-btn.primary{background:#5b5ce2;color:#fff;border-color:#5b5ce2}.pa-btn:disabled{opacity:.5;cursor:not-allowed}
+    .pa-user-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px}.pa-user{min-width:0;padding:15px;border:1px solid rgba(127,127,127,.13);border-radius:15px;background:linear-gradient(180deg,#fff,#fafaff)}.pa-user-top{display:flex;align-items:flex-start;gap:10px;min-width:0}.pa-avatar{flex:0 0 38px;width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:#5b5ce2;color:#fff;font-weight:800}.pa-identity{min-width:0;flex:1}.pa-name{font-size:12px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pa-email{margin-top:3px;color:#737789;font-size:9px;overflow-wrap:anywhere}.pa-badge{display:inline-flex;padding:5px 8px;border-radius:999px;background:rgba(127,127,127,.09);font-size:8px;font-weight:800}.pa-badge.admin{background:rgba(69,168,107,.13);color:#2d8a55}.pa-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding-top:11px;border-top:1px solid rgba(127,127,127,.09)}.pa-meta span{display:block;color:#9699a8;font-size:7px;font-weight:800;text-transform:uppercase}.pa-meta strong{display:block;margin-top:3px;font-size:9px;overflow-wrap:anywhere}.pa-active{color:#2d8a55}.pa-idle{color:#8c8f9d}.pa-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:12px}.pa-id{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#9a9eac;font-size:8px}.pa-detail{border:0;background:transparent;color:#5b5ce2;font-size:9px;font-weight:800;cursor:pointer}
+    .pa-pagination{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:13px;padding-top:12px;border-top:1px solid rgba(127,127,127,.09)}.pa-pagination span{color:#737789;font-size:9px}.pa-pages{display:flex;gap:5px}.pa-page{min-width:30px;height:30px;border:1px solid rgba(127,127,127,.14);border-radius:8px;background:#fff;font-size:9px;cursor:pointer}.pa-page.current{background:#5b5ce2;color:#fff;border-color:#5b5ce2}
+    .pa-audit{display:grid;gap:7px}.pa-event{display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid rgba(127,127,127,.08)}.pa-event:last-child{border-bottom:0}.pa-event time{color:#9699a8;font-size:8px}.pa-event strong{display:block;font-size:10px}.pa-event small{display:block;margin-top:2px;color:#737789;font-size:8px}.pa-event-status{font-size:8px;font-weight:800;color:#2d8a55}.pa-notice{padding:12px;border-radius:12px;background:rgba(91,92,226,.06);color:#64677a;font-size:9px;line-height:1.5}.pa-loading{display:grid;place-items:center;gap:7px;padding:45px;color:#737789;font-size:10px}.pa-spinner{width:24px;height:24px;border:3px solid rgba(91,92,226,.14);border-top-color:#5b5ce2;border-radius:50%;animation:paSpin .8s linear infinite}@keyframes paSpin{to{transform:rotate(360deg)}}
+    .pa-error{padding:20px;border-radius:15px;background:rgba(210,65,65,.06);color:#9a3c3c;font-size:10px}.pa-error strong{display:block;font-size:12px}.pa-error button{margin-top:10px}
+    @media(max-width:900px){.pa-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.pa-grid{grid-template-columns:1fr}.pa-toolbar{grid-template-columns:1fr 1fr}.pa-toolbar input{grid-column:1/-1}.pa-user-grid{grid-template-columns:1fr}}
+    @media(max-width:560px){.pa-hero{align-items:flex-start;flex-direction:column;padding:18px}.pa-live{width:100%;box-sizing:border-box}.pa-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.pa-kpi{padding:12px}.pa-kpi strong{font-size:20px}.pa-card{padding:14px}.pa-head{flex-direction:column}.pa-toolbar{grid-template-columns:1fr}.pa-user{padding:13px}.pa-meta{grid-template-columns:1fr}.pa-pagination{align-items:stretch;flex-direction:column}.pa-pages{flex-wrap:wrap}}
   `;
   document.head.appendChild(style);
 }
 
-function adminCredentials() {
-  try {
-    const userId = localStorage.getItem('cloud_userId');
-    const token = localStorage.getItem('cloud_token');
-    return userId && token ? { userId, token, name: localStorage.getItem('cloud_name') || '', email: localStorage.getItem('cloud_email') || '' } : null;
-  } catch { return null; }
+function adminCredentials(){
+  try{const userId=localStorage.getItem('cloud_userId'),token=localStorage.getItem('cloud_token');return userId&&token?{userId,token,email:localStorage.getItem('cloud_email')||''}:null}catch{return null}
+}
+function adminAuthFetch(url,options={}){const c=adminCredentials();const headers=new Headers(options.headers||{});if(c?.token)headers.set('Authorization',`Bearer ${c.token}`);headers.set('Accept','application/json');return fetch(url,{...options,headers,credentials:'include'})}
+function adminEscape(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function adminDate(v){if(!v)return'Belum pernah';const d=new Date(v);return Number.isNaN(d.getTime())?'Tanggal tidak valid':new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short'}).format(d)}
+function adminShortDate(v){if(!v)return'';const d=new Date(v);return Number.isNaN(d.getTime())?'':new Intl.DateTimeFormat('id-ID',{day:'2-digit',month:'short'}).format(d)}
+function adminActive(v){const t=Date.parse(v||'');return Number.isFinite(t)&&t>=Date.now()-30*86400000}
+function adminRecent(v,days){const t=Date.parse(v||'');return Number.isFinite(t)&&t>=Date.now()-days*86400000}
+function adminSetTabVisible(v){const b=document.getElementById('adminTabBtn');if(b)b.style.display=v?'':'none'}
+function adminSetPanel(html){const p=document.getElementById('adminPanel');if(p)p.innerHTML=html}
+function adminIsAuthorized(){return Boolean(adminCredentials())}
+window.isAdminAuthorized=adminIsAuthorized;
+
+function adminFilteredUsers(){
+  const q=(document.getElementById('adminUserSearch')?.value||'').trim().toLowerCase();
+  let list=adminUsers.filter(u=>`${u.name||''} ${u.email||''} ${u.userId||''}`.toLowerCase().includes(q));
+  if(adminRoleFilter==='admin')list=list.filter(u=>u.isAdmin);
+  if(adminRoleFilter==='user')list=list.filter(u=>!u.isAdmin);
+  if(adminStatusFilter==='active')list=list.filter(u=>adminActive(u.lastLogin));
+  if(adminStatusFilter==='inactive')list=list.filter(u=>!adminActive(u.lastLogin));
+  list.sort((a,b)=>adminSort==='name'?String(a.name||'').localeCompare(String(b.name||''),'id'):adminSort==='login'?Date.parse(b.lastLogin||0)-Date.parse(a.lastLogin||0):Date.parse(b.createdAt||0)-Date.parse(a.createdAt||0));
+  return list;
 }
 
-function adminAuthFetch(url, options = {}) {
-  const credentials = adminCredentials();
-  const headers = new Headers(options.headers || {});
-  if (credentials?.token) headers.set('Authorization', `Bearer ${credentials.token}`);
-  headers.set('Accept', 'application/json');
-  return fetch(url, { ...options, headers, credentials: 'include' });
+function adminBuildChart(users,range){
+  const days=range<=30?range:90;const now=new Date();const buckets=[];
+  for(let i=days-1;i>=0;i--){const d=new Date(now);d.setHours(0,0,0,0);d.setDate(d.getDate()-i);buckets.push({key:d.toISOString().slice(0,10),label:adminShortDate(d),count:0,login:0})}
+  const map=new Map(buckets.map(b=>[b.key,b]));
+  users.forEach(u=>{const c=String(u.createdAt||'').slice(0,10);if(map.has(c))map.get(c).count++;const l=String(u.lastLogin||'').slice(0,10);if(map.has(l))map.get(l).login++});
+  const max=Math.max(1,...buckets.map(b=>Math.max(b.count,b.login)));const w=760,h=205,pad={l:30,r:10,t:12,b:28};const innerW=w-pad.l-pad.r,innerH=h-pad.t-pad.b;
+  const points=key=>buckets.map((b,i)=>`${pad.l+(i/(Math.max(1,buckets.length-1)))*innerW},${pad.t+innerH-(b[key]/max)*innerH}`).join(' ');
+  const area=`${pad.l},${pad.t+innerH} ${points('count')} ${pad.l+innerW},${pad.t+innerH}`;
+  const grid=[0,.25,.5,.75,1].map(v=>{const y=pad.t+innerH-v*innerH;return`<line class="pa-chart-grid" x1="${pad.l}" x2="${pad.l+innerW}" y1="${y}" y2="${y}"/>`}).join('');
+  const labels=buckets.filter((_,i)=>i===0||i===buckets.length-1||i%Math.max(1,Math.floor(buckets.length/5))===0).map((b)=>{const i=buckets.indexOf(b);return`<text class="pa-axis" x="${pad.l+(i/(Math.max(1,buckets.length-1)))*innerW}" y="${h-6}" text-anchor="middle">${adminEscape(b.label)}</text>`}).join('');
+  const dots=buckets.map((b,i)=>i===buckets.length-1?`<circle class="pa-chart-dot" cx="${pad.l+(i/(Math.max(1,buckets.length-1)))*innerW}" cy="${pad.t+innerH-(b.count/max)*innerH}" r="4"/>`: '').join('');
+  return`<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}<polygon class="pa-chart-area" points="${area}"/><polyline class="pa-chart-line" points="${points('count')}"/>${dots}${labels}</svg>`;
 }
 
-function adminEscape(value) {
-  return String(value ?? '').replace(/[&<>\'\"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
+function adminRender(){
+  const panel=document.getElementById('adminPanel');if(!panel)return;const c=adminCredentials();if(!c){adminSetTabVisible(false);adminSetPanel('<div class="admin-lock"><h3>🔒 Admin Panel Terkunci</h3><p>Login menggunakan akun administrator untuk mengakses panel ini.</p><button class="btn btn-primary" type="button" onclick="switchTab(\'cloud\')">☁️ Buka Cloud / Login</button></div>');return}
+  adminSetTabVisible(true);const filtered=adminFilteredUsers();const total=adminUsers.length;const active=adminUsers.filter(u=>adminActive(u.lastLogin)).length;const new7=adminUsers.filter(u=>adminRecent(u.createdAt,7)).length;const logins=adminUsers.filter(u=>adminRecent(u.lastLogin,1)).length;const pages=Math.max(1,Math.ceil(filtered.length/adminPageSize));adminPage=Math.min(adminPage,pages);const start=(adminPage-1)*adminPageSize;const visible=filtered.slice(start,start+adminPageSize);
+  const cards=visible.length?visible.map(u=>{const a=adminActive(u.lastLogin);return`<article class="pa-user"><div class="pa-user-top"><div class="pa-avatar">${adminEscape((u.name||'U').trim().charAt(0).toUpperCase())}</div><div class="pa-identity"><div class="pa-name">${adminEscape(u.name||'Tanpa nama')}</div><div class="pa-email">${adminEscape(u.email||'Email tidak tersedia')}</div></div><span class="pa-badge ${u.isAdmin?'admin':''}">${u.isAdmin?'Admin':'User'}</span></div><div class="pa-meta"><div><span>Terdaftar</span><strong>${adminEscape(adminDate(u.createdAt))}</strong></div><div><span>Login terakhir</span><strong>${adminEscape(adminDate(u.lastLogin))}</strong></div><div><span>Status</span><strong class="${a?'pa-active':'pa-idle'}">${a?'● Aktif':'○ Tidak aktif'}</strong></div><div><span>ID</span><strong>${adminEscape(u.userId||'—')}</strong></div></div><div class="pa-foot"><span class="pa-id">${adminEscape(u.userId||'—')}</span><button class="pa-detail" type="button" data-pa-detail="${adminEscape(u.userId)}">Lihat detail →</button></div></article>`}).join(''):'<div class="pa-notice">Tidak ada pengguna yang cocok dengan filter saat ini.</div>';
+  const audit=adminUsers.filter(u=>u.lastLogin).sort((a,b)=>Date.parse(b.lastLogin)-Date.parse(a.lastLogin)).slice(0,8).map(u=>`<div class="pa-event"><time>${adminEscape(adminDate(u.lastLogin))}</time><div><strong>Login terakhir</strong><small>${adminEscape(u.name||u.email||'User')} • ${adminEscape(u.email||'')}</small></div><span class="pa-event-status">SUCCESS</span></div>`).join('');
+  const pageButtons=[];const lo=Math.max(1,adminPage-2),hi=Math.min(pages,adminPage+2);for(let i=lo;i<=hi;i++)pageButtons.push(`<button class="pa-page ${i===adminPage?'current':''}" data-pa-page="${i}">${i}</button>`);
+  panel.innerHTML=`<div class="pa-shell"><section class="pa-hero"><div><span class="pa-kicker">ADMIN CONTROL CENTER</span><h2>Production Dashboard</h2><p>Monitoring pengguna, pertumbuhan akun, aktivitas login, dan kontrol akses.</p></div><div class="pa-live"><span class="pa-dot"></span><div><strong>System Online</strong><small>Worker API terhubung</small></div></div></section>
+  <section class="pa-kpis"><div class="pa-kpi"><span>Total Users</span><strong>${total}</strong><small>Semua akun</small></div><div class="pa-kpi"><span>Active 30D</span><strong>${active}</strong><small>Login dalam 30 hari</small></div><div class="pa-kpi"><span>New 7D</span><strong>${new7}</strong><small>Registrasi baru</small></div><div class="pa-kpi"><span>Login 24H</span><strong>${logins}</strong><small>Snapshot login terakhir</small></div><div class="pa-kpi"><span>API</span><strong>OK</strong><small>Protected Worker</small></div></section>
+  <section class="pa-grid"><div class="pa-card"><div class="pa-head"><div><span class="pa-kicker">ANALYTICS</span><h3>User Growth</h3><p>Registrasi per hari berdasarkan createdAt.</p></div><select class="pa-select" id="paRange"><option value="30" ${adminRange===30?'selected':''}>30 hari</option><option value="90" ${adminRange===90?'selected':''}>90 hari</option></select></div><div class="pa-chart">${adminUsers.length?adminBuildChart(adminUsers,adminRange):'<div class="pa-empty-chart">Belum ada data</div>'}</div></div>
+  <div class="pa-card"><div class="pa-head"><div><span class="pa-kicker">LOGIN ACTIVITY</span><h3>Aktivitas Login</h3><p>Distribusi berdasarkan login terakhir setiap user.</p></div></div><div class="pa-chart">${adminUsers.length?adminBuildChart(adminUsers,adminRange).replaceAll('pa-chart-line','pa-chart-line'): '<div class="pa-empty-chart">Belum ada data</div>'}</div></div></section>
+  <section class="pa-card"><div class="pa-head"><div><span class="pa-kicker">USER MANAGEMENT</span><h3>Pengguna</h3><p>${filtered.length} hasil • halaman ${adminPage} dari ${pages}</p></div><div class="pa-actions"><button class="pa-btn" id="paConfig">🔎 Konfigurasi</button><button class="pa-btn primary" id="paRefresh">↻ Refresh</button></div></div>
+  <div class="pa-toolbar"><input id="adminUserSearch" type="search" placeholder="Cari nama, email, atau ID..." value="${adminEscape(document.getElementById('adminUserSearch')?.value||'')}"><select id="paRole"><option value="all">Semua role</option><option value="admin" ${adminRoleFilter==='admin'?'selected':''}>Admin</option><option value="user" ${adminRoleFilter==='user'?'selected':''}>User</option></select><select id="paStatus"><option value="all">Semua status</option><option value="active" ${adminStatusFilter==='active'?'selected':''}>Aktif 30D</option><option value="inactive" ${adminStatusFilter==='inactive'?'selected':''}>Tidak aktif</option></select><select id="paSort"><option value="newest" ${adminSort==='newest'?'selected':''}>Terbaru daftar</option><option value="login" ${adminSort==='login'?'selected':''}>Login terbaru</option><option value="name" ${adminSort==='name'?'selected':''}>Nama A-Z</option></select><select id="paSize">${ADMIN_PAGE_SIZES.map(n=>`<option value="${n}" ${adminPageSize===n?'selected':''}>${n}/halaman</option>`).join('')}</select></div>
+  <div class="pa-user-grid">${cards}</div><div class="pa-pagination"><span>Menampilkan ${filtered.length?start+1:0}–${Math.min(start+adminPageSize,filtered.length)} dari ${filtered.length}</span><div class="pa-pages"><button class="pa-page" data-pa-prev ${adminPage===1?'disabled':''}>‹</button>${pageButtons.join('')}<button class="pa-page" data-pa-next ${adminPage===pages?'disabled':''}>›</button></div></div></section>
+  <section class="pa-card"><div class="pa-head"><div><span class="pa-kicker">AUDIT & ACTIVITY</span><h3>Login Activity Snapshot</h3><p>Menampilkan login terakhir yang tersedia dari data user saat ini.</p></div></div><div class="pa-notice">Audit trail historis penuh belum dapat dibuat dari data lama karena Worker saat ini belum menyimpan event login sebagai record terpisah. Dashboard tidak memalsukan histori. Event di bawah adalah snapshot <b>lastLogin</b> per pengguna.</div><div class="pa-audit" style="margin-top:8px">${audit||'<div class="pa-notice">Belum ada data login.</div>'}</div></section></div>`;
+  document.getElementById('adminUserSearch')?.addEventListener('input',()=>{adminPage=1;adminRender()});document.getElementById('paRole')?.addEventListener('change',e=>{adminRoleFilter=e.target.value;adminPage=1;adminRender()});document.getElementById('paStatus')?.addEventListener('change',e=>{adminStatusFilter=e.target.value;adminPage=1;adminRender()});document.getElementById('paSort')?.addEventListener('change',e=>{adminSort=e.target.value;adminPage=1;adminRender()});document.getElementById('paSize')?.addEventListener('change',e=>{adminPageSize=Number(e.target.value)||10;adminPage=1;adminRender()});document.getElementById('paRange')?.addEventListener('change',e=>{adminRange=Number(e.target.value)||30;adminRender()});document.getElementById('paRefresh')?.addEventListener('click',()=>loadAdminPanel(true));document.getElementById('paConfig')?.addEventListener('click',adminCheckConfig);document.querySelectorAll('[data-pa-page]').forEach(b=>b.addEventListener('click',()=>{adminPage=Number(b.dataset.paPage);adminRender()}));document.querySelector('[data-pa-prev]')?.addEventListener('click',()=>{if(adminPage>1){adminPage--;adminRender()}});document.querySelector('[data-pa-next]')?.addEventListener('click',()=>{if(adminPage<pages){adminPage++;adminRender()}});panel.querySelectorAll('[data-pa-detail]').forEach(b=>b.addEventListener('click',()=>adminShowDetail(b.dataset.paDetail)));
 }
 
-function adminDate(value) {
-  if (!value) return 'Belum pernah';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Tanggal tidak valid';
-  return new Intl.DateTimeFormat('id-ID', { dateStyle:'medium', timeStyle:'short' }).format(date);
-}
+async function adminCheckConfig(){const c=adminCredentials();if(!c){alert('Sesi login belum tersedia.');return}try{const r=await adminAuthFetch(`${ADMIN_API_URL}/api/admin/config-status`);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||`HTTP ${r.status}`);adminSetPanel(`<div class="pa-error"><strong>🔎 Diagnostik Worker</strong><p>ADMIN_EMAIL: ${d.adminConfigured?'✅ TERSEDIA':'❌ TIDAK TERSEDIA'}<br>PEMBUKUAN_KV: ${d.kvConfigured?'✅ TERSEDIA':'❌ TIDAK TERSEDIA'}<br>Sesi: ✅ terautentikasi</p><button class="pa-btn" id="paBack">← Kembali</button></div>`);document.getElementById('paBack')?.addEventListener('click',()=>adminRender())}catch(e){adminSetPanel(`<div class="pa-error"><strong>❌ Diagnostik gagal</strong><p>${adminEscape(e.message)}</p><button class="pa-btn" onclick="loadAdminPanel(true)">Coba lagi</button></div>`)}}
+window.adminCheckConfig=adminCheckConfig;
 
-function adminIsRecentlyActive(value) {
-  const t = Date.parse(value || '');
-  return Number.isFinite(t) && t >= Date.now() - 30 * 24 * 60 * 60 * 1000;
-}
+function adminShowDetail(id){const u=adminUsers.find(x=>x.userId===id);if(!u)return;adminSetPanel(`<div class="pa-card"><button class="pa-btn" id="paBack">← Kembali</button><span class="pa-kicker" style="display:block;margin-top:15px">USER PROFILE</span><h2 style="margin:5px 0">${adminEscape(u.name||'Tanpa nama')}</h2><p style="color:#737789;font-size:10px">${adminEscape(u.email||'')}</p><div class="pa-meta"><div><span>Role</span><strong>${u.isAdmin?'Administrator':'User'}</strong></div><div><span>Status</span><strong class="${adminActive(u.lastLogin)?'pa-active':'pa-idle'}">${adminActive(u.lastLogin)?'Aktif 30 hari':'Tidak aktif 30 hari'}</strong></div><div><span>Terdaftar</span><strong>${adminEscape(adminDate(u.createdAt))}</strong></div><div><span>Login terakhir</span><strong>${adminEscape(adminDate(u.lastLogin))}</strong></div><div><span>User ID</span><strong style="word-break:break-all">${adminEscape(u.userId||'—')}</strong></div><div><span>Email</span><strong style="word-break:break-all">${adminEscape(u.email||'—')}</strong></div></div></div>`);document.getElementById('paBack')?.addEventListener('click',adminRender)}
 
-function adminSetPanel(html) { const panel = document.getElementById('adminPanel'); if (panel) panel.innerHTML = html; }
-function adminSetTabVisible(visible) { const button = document.getElementById('adminTabBtn'); if (button) button.style.display = visible ? '' : 'none'; }
-function adminIsAuthorized() { return Boolean(adminCredentials()); }
-window.isAdminAuthorized = adminIsAuthorized;
+async function loadAdminPanel(force=false){if(adminLoading)return;if(!force&&adminLoaded){adminRender();return}const c=adminCredentials();if(!c){adminLoaded=false;adminSetTabVisible(false);adminRender();return}adminLoading=true;adminSetTabVisible(true);adminSetPanel('<div class="pa-loading"><div class="pa-spinner"></div><strong>Memuat Production Admin Dashboard...</strong><span>Mengambil data pengguna dari Worker secara aman.</span></div>');try{const r=await adminAuthFetch(`${ADMIN_API_URL}/api/admin/users`);const d=await r.json().catch(()=>({}));if(r.status===401)throw new Error('Sesi login tidak valid atau kedaluwarsa.');if(r.status===403)throw new Error('Akses admin ditolak. Pastikan email akun sama dengan ADMIN_EMAIL.');if(r.status===503)throw new Error('ADMIN_EMAIL belum tersedia pada Worker.');if(!r.ok)throw new Error(d.error||'Gagal mengambil data pengguna.');adminUsers=Array.isArray(d.users)?d.users:[];adminLoaded=true;adminPage=1;adminRender()}catch(e){adminUsers=[];adminLoaded=false;adminSetPanel(`<div class="pa-error"><strong>❌ Gagal memuat Admin Dashboard</strong><p>${adminEscape(e.message||'Backend tetap melindungi data admin.')}</p><button class="pa-btn primary" onclick="loadAdminPanel(true)">↻ Coba Lagi</button></div>`)}finally{adminLoading=false}}
+window.loadAdminPanel=loadAdminPanel;
 
-async function adminCheckConfig() {
-  const credentials = adminCredentials();
-  if (!credentials) { alert('Sesi login belum tersedia. Silakan login terlebih dahulu.'); return; }
-  const button = document.getElementById('adminConfigCheck');
-  if (button) { button.disabled = true; button.textContent = '⏳ Mengecek...'; }
-  try {
-    const response = await adminAuthFetch(`${ADMIN_API_URL}/api/admin/config-status`);
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 401) throw new Error('Sesi login tidak valid atau sudah kedaluwarsa.');
-    if (!response.ok) throw new Error(data.error || `Worker mengembalikan HTTP ${response.status}.`);
-    const adminState = data.adminConfigured ? '✅ TERSEDIA' : '❌ TIDAK TERSEDIA';
-    const kvState = data.kvConfigured ? '✅ TERSEDIA' : '❌ TIDAK TERSEDIA';
-    adminSetPanel(`<div class="content-card admin-diagnostic-card"><div class="admin-toolbar"><div><span class="admin-kicker">SYSTEM CHECK</span><h3>🔎 Diagnostik Worker</h3><p>Pengecekan aman konfigurasi runtime. Nilai rahasia tidak ditampilkan.</p></div><button class="btn btn-secondary" id="adminConfigBack" type="button">← Kembali</button></div><div class="admin-status ${data.adminConfigured && data.kvConfigured ? 'success' : 'error'}" style="margin-top:14px"><strong>ADMIN_EMAIL: ${adminState}</strong><br><strong>PEMBUKUAN_KV: ${kvState}</strong><p style="margin:8px 0 0">Sesi login: ✅ terautentikasi</p></div><div style="margin-top:14px;opacity:.7;font-size:.9rem">Pengecekan: ${adminEscape(data.checkedAt || new Date().toISOString())}</div></div>`);
-    document.getElementById('adminConfigBack')?.addEventListener('click', () => { adminLoaded = false; loadAdminPanel(true); });
-  } catch (error) {
-    adminSetPanel(`<div class="admin-status error"><strong>❌ Diagnostik gagal</strong><p style="margin:8px 0 0">${adminEscape(error.message || 'Tidak dapat memeriksa Worker.')}</p><button class="btn btn-primary" type="button" style="margin-top:12px" id="adminConfigRetry">Coba Lagi</button></div>`);
-    document.getElementById('adminConfigRetry')?.addEventListener('click', adminCheckConfig);
-  } finally {
-    const currentButton = document.getElementById('adminConfigCheck');
-    if (currentButton) { currentButton.disabled = false; currentButton.textContent = '🔎 Cek Konfigurasi'; }
-  }
-}
-window.adminCheckConfig = adminCheckConfig;
-
-function adminRender() {
-  const panel = document.getElementById('adminPanel');
-  if (!panel) return;
-  const credentials = adminCredentials();
-  if (!credentials) {
-    adminSetTabVisible(false);
-    panel.innerHTML = '<div class="admin-lock"><h3>🔒 Admin Panel Terkunci</h3><p>Login menggunakan akun administrator untuk mengakses panel ini.</p><button class="btn btn-primary" type="button" onclick="switchTab(\'cloud\')">☁️ Buka Cloud / Login</button></div>';
-    return;
-  }
-  adminSetTabVisible(true);
-  const queryEl = document.getElementById('adminUserSearch');
-  const query = queryEl ? queryEl.value.trim().toLowerCase() : '';
-  const filtered = adminUsers.filter(user => `${user.name || ''} ${user.email || ''} ${user.userId || ''}`.toLowerCase().includes(query));
-  const total = adminUsers.length;
-  const active = adminUsers.filter(user => adminIsRecentlyActive(user.lastLogin)).length;
-  const recent = adminUsers.filter(user => { const t = Date.parse(user.createdAt || ''); return Number.isFinite(t) && t >= Date.now() - 7 * 24 * 60 * 60 * 1000; }).length;
-  const cards = filtered.length ? filtered.map(user => {
-    const isAdmin = Boolean(user.isAdmin);
-    const activeNow = adminIsRecentlyActive(user.lastLogin);
-    return `<article class="admin-user-card"><div class="admin-user-main"><div class="admin-avatar">${adminEscape((user.name || 'U').trim().charAt(0).toUpperCase())}</div><div class="admin-user-identity"><div class="name">${adminEscape(user.name || 'Tanpa nama')}</div><div class="sub">${adminEscape(user.email || 'Email tidak tersedia')}</div></div><span class="admin-badge ${isAdmin ? 'admin' : ''}">${isAdmin ? 'Admin' : 'User'}</span></div><div class="admin-user-meta"><div><span>Terdaftar</span><strong>${adminEscape(adminDate(user.createdAt))}</strong></div><div><span>Login terakhir</span><strong>${adminEscape(adminDate(user.lastLogin))}</strong></div><div><span>Status</span><strong class="${activeNow ? 'is-active' : 'is-idle'}">${activeNow ? '● Aktif' : '○ Tidak aktif'}</strong></div></div><div class="admin-user-footer"><span class="admin-id">ID: ${adminEscape(user.userId || '—')}</span><button class="btn btn-small" type="button" data-admin-detail="${adminEscape(user.userId)}">Lihat detail →</button></div></article>`;
-  }).join('') : `<div class="admin-empty"><div class="admin-empty-icon">${query ? '⌕' : '👥'}</div><strong>${query ? 'Pengguna tidak ditemukan' : 'Belum ada pengguna'}</strong><p>${query ? 'Coba kata kunci lain.' : 'Belum ada akun pengguna yang tersedia.'}</p></div>`;
-  panel.innerHTML = `<div class="admin-hero"><div><span class="admin-kicker">ADMIN CONTROL CENTER</span><h2>Monitoring Pengguna</h2><p>Kelola dan pantau aktivitas pengguna NEXA dari satu dashboard.</p></div><div class="admin-live"><span class="admin-live-dot"></span><div><strong>System Online</strong><small>Worker API terhubung</small></div></div></div><div class="admin-summary"><div class="admin-stat"><div class="label">Total Pengguna</div><div class="value">${total}</div><div class="stat-foot">Semua akun</div></div><div class="admin-stat"><div class="label">Aktif 30 Hari</div><div class="value">${active}</div><div class="stat-foot">Aktivitas terakhir</div></div><div class="admin-stat"><div class="label">User Baru 7 Hari</div><div class="value">${recent}</div><div class="stat-foot">Registrasi terbaru</div></div><div class="admin-stat admin-stat-online"><div class="label">API Status</div><div class="value">ONLINE</div><div class="stat-foot">Operational</div></div></div><div class="content-card admin-users-card"><div class="admin-toolbar"><div><span class="admin-kicker">USER MANAGEMENT</span><h3>👥 Pengguna NEXA</h3><p>${filtered.length} dari ${total} pengguna ditampilkan</p></div><div class="admin-search"><input id="adminUserSearch" type="search" placeholder="Cari nama, email, atau ID..." value="${adminEscape(query)}"><button class="btn btn-secondary" id="adminClearSearch" type="button">Reset</button><button class="btn btn-secondary" id="adminConfigCheck" type="button">🔎 Cek Konfigurasi</button><button class="btn btn-primary" id="adminRefresh" type="button">↻ Refresh</button></div></div><div id="adminStatus" class="admin-status success" style="margin:14px 0">Admin terverifikasi • ${adminEscape(credentials.email || 'akun administrator')}</div><div class="admin-user-list">${cards}</div></div>`;
-  document.getElementById('adminUserSearch')?.addEventListener('input', adminRender);
-  document.getElementById('adminClearSearch')?.addEventListener('click', () => { const el = document.getElementById('adminUserSearch'); if (el) el.value = ''; adminRender(); });
-  document.getElementById('adminConfigCheck')?.addEventListener('click', adminCheckConfig);
-  document.getElementById('adminRefresh')?.addEventListener('click', () => window.loadAdminPanel(true));
-  panel.querySelectorAll('[data-admin-detail]').forEach(button => button.addEventListener('click', () => adminShowDetail(button.dataset.adminDetail)));
-}
-
-function adminRenderAccessError(title, message) {
-  adminSetPanel(`<div class="admin-status error"><strong>❌ ${adminEscape(title)}</strong><p style="margin:8px 0 0">${adminEscape(message)}</p><div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"><button class="btn btn-secondary" type="button" id="adminConfigCheck" onclick="adminCheckConfig()">🔎 Cek Konfigurasi</button><button class="btn btn-primary" type="button" onclick="loadAdminPanel(true)">↻ Coba Lagi</button></div></div>`);
-}
-
-function adminShowDetail(userId) {
-  const user = adminUsers.find(item => item.userId === userId);
-  if (!user) return;
-  const active = adminIsRecentlyActive(user.lastLogin);
-  adminSetPanel(`<div class="admin-detail-view"><div class="admin-detail-head"><button class="btn btn-secondary" id="adminDetailBack" type="button">← Kembali</button><span class="admin-kicker">USER PROFILE</span><h2>${adminEscape(user.name || 'Tanpa nama')}</h2><p>${adminEscape(user.email || 'Email tidak tersedia')}</p></div><div class="admin-detail-grid"><div class="admin-detail-item"><small>Role</small><strong>${user.isAdmin ? 'Administrator' : 'User'}</strong></div><div class="admin-detail-item"><small>Status aktivitas</small><strong class="${active ? 'is-active' : 'is-idle'}">${active ? '● Aktif 30 hari terakhir' : '○ Tidak login 30 hari terakhir'}</strong></div><div class="admin-detail-item"><small>User ID</small><strong class="break-anywhere">${adminEscape(user.userId || '—')}</strong></div><div class="admin-detail-item"><small>Terdaftar</small><strong>${adminEscape(adminDate(user.createdAt))}</strong></div><div class="admin-detail-item"><small>Login terakhir</small><strong>${adminEscape(adminDate(user.lastLogin))}</strong></div><div class="admin-detail-item"><small>Email</small><strong class="break-anywhere">${adminEscape(user.email || '—')}</strong></div></div></div>`);
-  document.getElementById('adminDetailBack')?.addEventListener('click', () => { adminLoaded = false; loadAdminPanel(true); });
-}
-
-async function loadAdminPanel(force = false) {
-  if (adminLoading) return;
-  if (!force && adminLoaded) { adminRender(); return; }
-  const credentials = adminCredentials();
-  if (!credentials) { adminLoaded = false; adminSetTabVisible(false); adminRender(); return; }
-  adminLoading = true;
-  adminSetTabVisible(true);
-  adminSetPanel('<div class="admin-loading"><div class="admin-loading-ring"></div><strong>Memuat dashboard administrator...</strong><span>Mengambil data pengguna secara aman</span></div>');
-  try {
-    const response = await adminAuthFetch(`${ADMIN_API_URL}/api/admin/users`);
-    const data = await response.json().catch(() => ({}));
-    if (response.status === 401) throw new Error('Sesi login tidak valid atau sudah kedaluwarsa. Silakan login kembali.');
-    if (response.status === 403) { adminRenderAccessError('Akses ditolak', 'Email akun login tidak terdaftar sebagai ADMIN_EMAIL.'); return; }
-    if (response.status === 503) { adminRenderAccessError('ADMIN_EMAIL belum tersedia pada Worker yang aktif', 'Periksa Variables & Secrets Cloudflare. Klik Cek Konfigurasi untuk melihat status runtime tanpa menampilkan nilai rahasia.'); return; }
-    if (!response.ok) throw new Error(data.error || 'Gagal mengambil data pengguna.');
-    adminUsers = Array.isArray(data.users) ? data.users : [];
-    adminLoaded = true;
-    adminRender();
-  } catch (error) {
-    adminUsers = [];
-    adminLoaded = false;
-    adminRenderAccessError('Gagal memuat Admin Panel', error.message || 'Backend tetap melindungi data admin.');
-  } finally { adminLoading = false; }
-}
-window.loadAdminPanel = loadAdminPanel;
-
-function initializeAdminModule() {
-  adminInjectStyles();
-  const credentials = adminCredentials();
-  adminSetTabVisible(Boolean(credentials));
-  if (credentials && document.getElementById('admin')?.classList.contains('active')) loadAdminPanel();
-}
-window.addEventListener('DOMContentLoaded', initializeAdminModule);
-window.addEventListener('storage', initializeAdminModule);
+function initializeAdminModule(){adminInjectStyles();const c=adminCredentials();adminSetTabVisible(Boolean(c));if(c&&document.getElementById('admin')?.classList.contains('active'))loadAdminPanel()}
+window.addEventListener('DOMContentLoaded',initializeAdminModule);window.addEventListener('storage',initializeAdminModule);
