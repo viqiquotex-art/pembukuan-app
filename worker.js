@@ -7,6 +7,14 @@ const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const PASSWORD_ITERATIONS = 100000;
 const LEGACY_PASSWORD_SUFFIX = ':pembukuan-salt-2026';
 
+// Authentication rate limiting.
+// KV-backed counters are intentionally short-lived so they clean themselves up.
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_SECONDS = 60 * 15;
+const REGISTER_MAX_ATTEMPTS = 5;
+const REGISTER_WINDOW_SECONDS = 60 * 60;
+const RATE_LIMIT_PREFIX = 'rate:';
+
 export default {
   async fetch(request, env) {
     const corsHeaders = getCorsHeaders();
@@ -43,13 +51,20 @@ export default {
 
 async function handleRegister(request, env, corsHeaders) {
   try {
-    const { email, password, name } = await request.json();
+    const body = await request.json();
+    const { email, password, name } = body || {};
     if (!email || !password || !name) return jsonResponse({ error: 'Missing required fields: email, password, name' }, 400, corsHeaders);
     if (!isValidEmail(email)) return jsonResponse({ error: 'Invalid email format' }, 400, corsHeaders);
-    if (password.length < 6) return jsonResponse({ error: 'Password must be at least 6 characters' }, 400, corsHeaders);
+    if (typeof password !== 'string' || password.length < 6) return jsonResponse({ error: 'Password must be at least 6 characters' }, 400, corsHeaders);
+    if (typeof name !== 'string' || name.trim().length < 2) return jsonResponse({ error: 'Name must be at least 2 characters' }, 400, corsHeaders);
+
     const kv = env.PEMBUKUAN_KV;
     if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
+
     const normalizedEmail = email.trim().toLowerCase();
+    const rate = await checkRateLimit(kv, `register:${normalizedEmail}`, REGISTER_MAX_ATTEMPTS, REGISTER_WINDOW_SECONDS);
+    if (!rate.allowed) return rateLimitResponse(rate, corsHeaders);
+
     if (await kv.get(`user:${normalizedEmail}`)) return jsonResponse({ error: 'Email already registered' }, 409, corsHeaders);
     const userId = generateId();
     const passwordData = await hashPassword(password);
@@ -68,11 +83,16 @@ async function handleRegister(request, env, corsHeaders) {
 
 async function handleLogin(request, env, corsHeaders) {
   try {
-    const { email, password } = await request.json();
+    const body = await request.json();
+    const { email, password } = body || {};
     if (!email || !password) return jsonResponse({ error: 'Missing email or password' }, 400, corsHeaders);
     const kv = env.PEMBUKUAN_KV;
     if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
+
     const normalizedEmail = email.trim().toLowerCase();
+    const rate = await checkRateLimit(kv, `login:${normalizedEmail}`, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS);
+    if (!rate.allowed) return rateLimitResponse(rate, corsHeaders);
+
     const raw = await kv.get(`user:${normalizedEmail}`);
     if (!raw) return jsonResponse({ error: 'Invalid email or password' }, 401, corsHeaders);
     const user = JSON.parse(raw);
@@ -80,6 +100,10 @@ async function handleLogin(request, env, corsHeaders) {
     if (user.passwordHash && user.passwordSalt) valid = await verifyPassword(password, user.passwordHash, user.passwordSalt);
     else if (user.password) valid = user.password === encodeLegacyPassword(password);
     if (!valid) return jsonResponse({ error: 'Invalid email or password' }, 401, corsHeaders);
+
+    // Clear the successful login counter so a later attack starts fresh.
+    await clearRateLimit(kv, `login:${normalizedEmail}`);
+
     if (user.password) {
       const passwordData = await hashPassword(password);
       user.passwordHash = passwordData.hash;
@@ -97,6 +121,42 @@ async function handleLogin(request, env, corsHeaders) {
     console.error('Login error:', error);
     return jsonResponse({ error: 'Login failed' }, 500, corsHeaders);
   }
+}
+
+async function checkRateLimit(kv, identifier, maxAttempts, windowSeconds) {
+  const key = `${RATE_LIMIT_PREFIX}${identifier}`;
+  const now = Date.now();
+  const raw = await kv.get(key);
+  let state = null;
+
+  if (raw) {
+    try { state = JSON.parse(raw); } catch { state = null; }
+  }
+
+  if (!state || !Number.isFinite(state.startedAt) || now - state.startedAt >= windowSeconds * 1000) {
+    state = { count: 0, startedAt: now };
+  }
+
+  if (state.count >= maxAttempts) {
+    const retryAfter = Math.max(1, Math.ceil((windowSeconds * 1000 - (now - state.startedAt)) / 1000));
+    return { allowed: false, retryAfter, limit: maxAttempts };
+  }
+
+  state.count += 1;
+  const remainingTtl = Math.max(1, Math.ceil((windowSeconds * 1000 - (now - state.startedAt)) / 1000));
+  await kv.put(key, JSON.stringify(state), { expirationTtl: remainingTtl });
+  return { allowed: true, retryAfter: remainingTtl, limit: maxAttempts, remaining: Math.max(0, maxAttempts - state.count) };
+}
+
+async function clearRateLimit(kv, identifier) {
+  await kv.delete(`${RATE_LIMIT_PREFIX}${identifier}`);
+}
+
+function rateLimitResponse(rate, corsHeaders) {
+  return jsonResponse({ error: 'Too many authentication attempts. Please try again later.', retryAfter: rate.retryAfter }, 429, {
+    ...corsHeaders,
+    'Retry-After': String(rate.retryAfter)
+  });
 }
 
 async function handleLogout(request, env, corsHeaders) {
@@ -158,7 +218,6 @@ async function handleGetUsers(request, env, corsHeaders) {
   }
 }
 
-// Bulk sync is kept for backward compatibility. Newer versions win per transaction ID.
 async function handleSaveTransactions(request, env, corsHeaders) {
   try {
     const body = await request.json();
@@ -181,7 +240,6 @@ async function handleSaveTransactions(request, env, corsHeaders) {
     const existingRaw = await env.PEMBUKUAN_KV.get(key);
     const existing = existingRaw ? JSON.parse(existingRaw) : [];
     const merged = new Map();
-
     for (const oldTx of existing) {
       if (oldTx && oldTx.id && !deletedIds.has(oldTx.id)) merged.set(oldTx.id, oldTx);
     }
@@ -190,8 +248,6 @@ async function handleSaveTransactions(request, env, corsHeaders) {
       const oldTx = merged.get(newTx.id);
       if (!oldTx || getTimestamp(newTx) >= getTimestamp(oldTx)) merged.set(newTx.id, newTx);
     }
-
-    // Do not treat missing IDs as deletions. Deletions use the DELETE endpoint and tombstones.
     const result = Array.from(merged.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
     await env.PEMBUKUAN_KV.put(key, JSON.stringify(result));
     return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders);
@@ -225,16 +281,13 @@ async function handleDeleteTransaction(userId, transactionId, request, env, cors
     if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
     if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders);
     if (!transactionId) return jsonResponse({ error: 'Transaction ID is required' }, 400, corsHeaders);
-
     const deletedAt = new Date().toISOString();
     await env.PEMBUKUAN_KV.put(`deleted:${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt }));
-
     const key = `transactions:${userId}`;
     const data = await env.PEMBUKUAN_KV.get(key);
     const transactions = data ? JSON.parse(data) : [];
     const filtered = transactions.filter(t => t.id !== transactionId);
     if (filtered.length !== transactions.length) await env.PEMBUKUAN_KV.put(key, JSON.stringify(filtered));
-
     return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders);
   } catch (error) {
     console.error('Delete transaction error:', error);
