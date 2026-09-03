@@ -56,6 +56,12 @@ function formatTime(dateString) {
 }
 
 function switchTab(tabName) {
+  const allowedTabs = ['input', 'history', 'recap', 'cloud', 'admin'];
+  if (!allowedTabs.includes(tabName)) return;
+  if (tabName === 'admin' && typeof window.isAdminAuthorized === 'function' && !window.isAdminAuthorized()) {
+    if (typeof showToast === 'function') showToast('🔒 Akses Admin ditolak. Gunakan akun administrator.', 'error');
+    return;
+  }
   document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
   const tabContent = document.getElementById(tabName);
@@ -65,6 +71,7 @@ function switchTab(tabName) {
   if (tabName === 'history') renderHistory();
   if (tabName === 'recap') renderRecap();
   if (tabName === 'cloud' && typeof renderCloudPanel === 'function') renderCloudPanel();
+  if (tabName === 'admin' && typeof window.loadAdminPanel === 'function') window.loadAdminPanel();
 }
 
 function updateCategories() {
@@ -241,23 +248,15 @@ function renderHistory() {
     item.appendChild(makeText('div', `transaction-amount ${isIncome ? 'income' : 'expense'}`, `${isIncome ? '+' : '-'}${formatRupiah(transaction.amount)}`));
     const actions = makeText('div', 'transaction-actions', '');
     const editButton = makeText('button', 'btn btn-info btn-small', '✏️ Edit');
-    editButton.type = 'button';
-    editButton.dataset.action = 'edit';
-    editButton.dataset.transactionId = String(transaction.id || '');
+    editButton.type = 'button'; editButton.dataset.action = 'edit'; editButton.dataset.transactionId = String(transaction.id || '');
     const deleteButton = makeText('button', 'btn btn-danger btn-small', '🗑️ Hapus');
-    deleteButton.type = 'button';
-    deleteButton.dataset.action = 'delete';
-    deleteButton.dataset.transactionId = String(transaction.id || '');
-    actions.appendChild(editButton);
-    actions.appendChild(deleteButton);
-    item.appendChild(actions);
-    listEl.appendChild(item);
+    deleteButton.type = 'button'; deleteButton.dataset.action = 'delete'; deleteButton.dataset.transactionId = String(transaction.id || '');
+    actions.appendChild(editButton); actions.appendChild(deleteButton); item.appendChild(actions); listEl.appendChild(item);
   });
   listEl.onclick = function (event) {
     const button = event.target.closest('button[data-action][data-transaction-id]');
     if (!button || !listEl.contains(button)) return;
-    const id = button.dataset.transactionId;
-    if (!id) return;
+    const id = button.dataset.transactionId; if (!id) return;
     if (button.dataset.action === 'edit') enterEditMode(id);
     else if (button.dataset.action === 'delete' && typeof window.deleteTransaction === 'function') window.deleteTransaction(id);
   };
@@ -267,107 +266,49 @@ function renderRecap() {
   const transactions = getTransactions();
   const grid = document.getElementById('recapGrid');
   if (!grid) return;
-  if (!transactions.length) {
-    grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><h3>Tidak ada data untuk direkap</h3><p>Tambahkan transaksi terlebih dahulu</p></div>';
-    return;
-  }
+  if (!transactions.length) { grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><h3>Tidak ada data untuk direkap</h3><p>Tambahkan transaksi terlebih dahulu</p></div>'; return; }
   const monthlyData = {};
   transactions.forEach(transaction => {
-    const date = new Date(transaction.date);
-    if (isNaN(date.getTime())) return;
+    const date = new Date(transaction.date); if (isNaN(date.getTime())) return;
     const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     if (!monthlyData[monthKey]) monthlyData[monthKey] = { income: 0, expense: 0 };
     const amount = Number(transaction.amount || 0);
     if (transaction.type === 'income') monthlyData[monthKey].income += amount;
     if (transaction.type === 'expense') monthlyData[monthKey].expense += amount;
   });
-  const sortedMonths = Object.keys(monthlyData).sort().reverse();
-  grid.replaceChildren();
+  const sortedMonths = Object.keys(monthlyData).sort().reverse(); grid.replaceChildren();
   sortedMonths.forEach(monthKey => {
-    const monthDate = new Date(`${monthKey}-01T00:00:00`);
-    const monthName = monthDate.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
-    const data = monthlyData[monthKey];
-    const balance = data.income - data.expense;
-    const card = makeText('div', 'month-card', '');
-    card.appendChild(makeText('h3', '', monthName));
-    const incomeRow = makeText('div', 'recap-row income', '');
-    incomeRow.appendChild(makeText('span', 'label', '💰 Pemasukan'));
-    incomeRow.appendChild(makeText('span', 'value', formatRupiah(data.income)));
-    card.appendChild(incomeRow);
-    const expenseRow = makeText('div', 'recap-row expense', '');
-    expenseRow.appendChild(makeText('span', 'label', '💸 Pengeluaran'));
-    expenseRow.appendChild(makeText('span', 'value', formatRupiah(data.expense)));
-    card.appendChild(expenseRow);
-    const totalRow = makeText('div', 'recap-row total', '');
-    totalRow.appendChild(makeText('span', 'label', '📊 Saldo'));
-    totalRow.appendChild(makeText('span', `value ${balance >= 0 ? 'income' : 'expense'}`, formatRupiah(balance)));
-    card.appendChild(totalRow);
-    grid.appendChild(card);
+    const monthDate = new Date(`${monthKey}-01T00:00:00`); const monthName = monthDate.toLocaleString('id-ID', { month: 'long', year: 'numeric' });
+    const data = monthlyData[monthKey]; const balance = data.income - data.expense;
+    const card = makeText('div', 'month-card', ''); card.appendChild(makeText('h3', '', monthName));
+    const incomeRow = makeText('div', 'recap-row income', ''); incomeRow.appendChild(makeText('span', 'label', '💰 Pemasukan')); incomeRow.appendChild(makeText('span', 'value', formatRupiah(data.income))); card.appendChild(incomeRow);
+    const expenseRow = makeText('div', 'recap-row expense', ''); expenseRow.appendChild(makeText('span', 'label', '💸 Pengeluaran')); expenseRow.appendChild(makeText('span', 'value', formatRupiah(data.expense))); card.appendChild(expenseRow);
+    const totalRow = makeText('div', 'recap-row total', ''); totalRow.appendChild(makeText('span', 'label', '📊 Saldo')); totalRow.appendChild(makeText('span', `value ${balance >= 0 ? 'income' : 'expense'}`, formatRupiah(balance))); card.appendChild(totalRow); grid.appendChild(card);
   });
 }
 
-function goToCloudPage() {
-  window.location.assign('./cloud.html');
-}
+function goToCloudPage() { window.location.assign('./cloud.html'); }
 
 function renderCloudPanel() {
   const credentials = typeof getCloudCredentials === 'function' ? getCloudCredentials() : null;
-  const panel = document.getElementById('cloudPanel');
-  if (!panel) return;
+  const panel = document.getElementById('cloudPanel'); if (!panel) return;
   if (!credentials) {
-    panel.innerHTML = `
-      <div class="cloud-info">
-        <h3>☁️ Cloud Storage - Offline</h3>
-        <p>Sinkronisasi data Anda ke cloud untuk akses di berbagai device dan backup data.</p>
-        <a class="btn btn-primary" href="./cloud.html">🔑 Login / Daftar Cloud</a>
-        <div class="cloud-tips" style="margin-top:20px;">
-          <p><strong>Mengapa pakai cloud?</strong></p>
-          <ul><li>💾 Backup data</li><li>📱 Akses berbagai device</li><li>🔄 Sinkronisasi</li><li>🔒 Data tersimpan di cloud</li></ul>
-        </div>
-      </div>`;
-    return;
+    panel.innerHTML = `<div class="cloud-info"><h3>☁️ Cloud Storage - Offline</h3><p>Sinkronisasi data Anda ke cloud untuk akses di berbagai device dan backup data.</p><a class="btn btn-primary" href="./cloud.html">🔑 Login / Daftar Cloud</a><div class="cloud-tips" style="margin-top:20px;"><p><strong>Mengapa pakai cloud?</strong></p><ul><li>💾 Backup data</li><li>📱 Akses berbagai device</li><li>🔄 Sinkronisasi</li><li>🔒 Data tersimpan di cloud</li></ul></div></div>`; return;
   }
-  const safeName = escapeHtml(credentials.name || '-');
-  const safeEmail = escapeHtml(credentials.email || '');
-  panel.innerHTML = `
-    <div class="cloud-info">
-      <h3>☁️ Cloud Storage - Terhubung ✅</h3>
-      <p><strong>${safeName}</strong></p>
-      <p style="font-size:12px;">${safeEmail}</p>
-      <div class="cloud-actions">
-        <button class="btn btn-primary" onclick="syncToCloudFromApp()">📤 Sync ke Cloud</button>
-        <button class="btn btn-primary" onclick="loadFromCloudToApp()">📥 Muat dari Cloud</button>
-        <button class="btn btn-danger" onclick="logoutCloud()">🚪 Logout</button>
-      </div>
-      <div class="cloud-tips">
-        <p><strong>💡 Tips</strong></p>
-        <ul><li>📤 Sync = kirim data lokal</li><li>📥 Muat = ambil data cloud</li><li>🔄 Auto Sync aktif</li></ul>
-      </div>
-    </div>`;
+  const safeName = escapeHtml(credentials.name || '-'); const safeEmail = escapeHtml(credentials.email || '');
+  panel.innerHTML = `<div class="cloud-info"><h3>☁️ Cloud Storage - Terhubung ✅</h3><p><strong>${safeName}</strong></p><p style="font-size:12px;">${safeEmail}</p><div class="cloud-actions"><button class="btn btn-primary" onclick="syncToCloudFromApp()">📤 Sync ke Cloud</button><button class="btn btn-primary" onclick="loadFromCloudToApp()">📥 Muat dari Cloud</button><button class="btn btn-danger" onclick="logoutCloud()">🚪 Logout</button></div><div class="cloud-tips"><p><strong>💡 Tips</strong></p><ul><li>📤 Sync = kirim data lokal</li><li>📥 Muat = ambil data cloud</li><li>🔄 Auto Sync aktif</li></ul></div></div>`;
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>\'\"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-}
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>\'\"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char])); }
 
 function showToast(message, type = 'info') {
-  const existing = document.querySelector('.toast');
-  if (existing) existing.remove();
-  const toast = document.createElement('div');
-  toast.className = `toast toast-${type}`;
-  toast.textContent = message;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.classList.add('show'), 10);
-  setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
+  const existing = document.querySelector('.toast'); if (existing) existing.remove();
+  const toast = document.createElement('div'); toast.className = `toast toast-${type}`; toast.textContent = message; document.body.appendChild(toast);
+  setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  setTodayDate();
-  updateCategories();
-  renderHistory();
-  renderRecap();
-  renderCloudPanel();
-  updateCloudStatus();
+  setTodayDate(); updateCategories(); renderHistory(); renderRecap(); renderCloudPanel(); updateCloudStatus();
   const style = document.createElement('style');
   style.textContent = `.toast { position: fixed; bottom: -100px; left: 50%; transform: translateX(-50%); background: white; padding: 16px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.15); font-size: 14px; z-index: 10000; transition: bottom .3s ease; max-width: 400px; text-align: center; } .toast.show { bottom: 20px; } .toast-success { border-left: 4px solid #45a86b; color: #45a86b; } .toast-error { border-left: 4px solid #ef4444; color: #ef4444; } .toast-info { border-left: 4px solid #6d5dfc; color: #6d5dfc; } @media(max-width:600px) { .toast { max-width: calc(100% - 40px); font-size: 12px; padding: 12px 16px; } }`;
   document.head.appendChild(style);
