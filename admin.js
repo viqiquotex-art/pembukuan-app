@@ -119,9 +119,10 @@ async function adminCheckConfig() {
     `);
     document.getElementById('adminConfigRetry')?.addEventListener('click', adminCheckConfig);
   } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = '🔎 Cek Konfigurasi';
+    const currentButton = document.getElementById('adminConfigCheck');
+    if (currentButton) {
+      currentButton.disabled = false;
+      currentButton.textContent = '🔎 Cek Konfigurasi';
     }
   }
 }
@@ -155,6 +156,19 @@ function adminRender() {
   panel.querySelectorAll('[data-admin-detail]').forEach(button => button.addEventListener('click', () => adminShowDetail(button.dataset.adminDetail)));
 }
 
+function adminRenderAccessError(title, message) {
+  adminSetPanel(`
+    <div class="admin-status error">
+      <strong>❌ ${adminEscape(title)}</strong>
+      <p style="margin:8px 0 0">${adminEscape(message)}</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn btn-secondary" type="button" id="adminConfigCheck" onclick="adminCheckConfig()">🔎 Cek Konfigurasi</button>
+        <button class="btn btn-primary" type="button" onclick="loadAdminPanel(true)">↻ Coba Lagi</button>
+      </div>
+    </div>
+  `);
+}
+
 function adminShowDetail(userId) {
   const user = adminUsers.find(item => item.userId === userId);
   if (!user) return;
@@ -179,8 +193,14 @@ async function loadAdminPanel(force = false) {
     const response = await adminAuthFetch(`${ADMIN_API_URL}/api/admin/users`);
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) throw new Error('Sesi login tidak valid atau sudah kedaluwarsa. Silakan login kembali.');
-    if (response.status === 403) throw new Error('Akses ditolak. Email akun login tidak terdaftar sebagai ADMIN_EMAIL.');
-    if (response.status === 503) throw new Error('ADMIN_EMAIL belum tersedia pada Worker yang aktif. Periksa Variables & Secrets Cloudflare.');
+    if (response.status === 403) {
+      adminRenderAccessError('Akses ditolak', 'Email akun login tidak terdaftar sebagai ADMIN_EMAIL.');
+      return;
+    }
+    if (response.status === 503) {
+      adminRenderAccessError('ADMIN_EMAIL belum tersedia pada Worker yang aktif', 'Periksa Variables & Secrets Cloudflare. Klik Cek Konfigurasi untuk melihat status runtime tanpa menampilkan nilai rahasia.');
+      return;
+    }
     if (!response.ok) throw new Error(data.error || 'Gagal mengambil data pengguna.');
     adminUsers = Array.isArray(data.users) ? data.users : [];
     adminLoaded = true;
@@ -188,7 +208,7 @@ async function loadAdminPanel(force = false) {
   } catch (error) {
     adminUsers = [];
     adminLoaded = false;
-    adminSetPanel(`<div class="admin-status error"><strong>❌ ${adminEscape(error.message || 'Gagal memuat Admin Panel')}</strong><p style="margin:8px 0 0">Backend tetap melindungi data admin. Periksa sesi login dan konfigurasi ADMIN_EMAIL jika diperlukan.</p><button class="btn btn-primary" type="button" style="margin-top:12px" onclick="loadAdminPanel(true)">Coba Lagi</button></div>`);
+    adminRenderAccessError('Gagal memuat Admin Panel', error.message || 'Backend tetap melindungi data admin.');
   } finally {
     adminLoading = false;
   }
