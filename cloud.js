@@ -1,10 +1,8 @@
 // ==========================================
-// PEMBUKUAN CLOUD
+// PEMBUKUAN CLOUD - COOKIE SESSION
 // ==========================================
 
-const API_BASE_URL =
-  'https://pembukuan-app.viqiquotex.workers.dev';
-
+const API_BASE_URL = 'https://pembukuan-app.viqiquotex.workers.dev';
 const API_ENDPOINTS = {
   register: `${API_BASE_URL}/api/auth/register`,
   login: `${API_BASE_URL}/api/auth/login`,
@@ -16,67 +14,35 @@ const API_ENDPOINTS = {
   export: userId => `${API_BASE_URL}/api/export/${userId}`
 };
 
-// ==========================================
-// STORAGE
-// ==========================================
-
 function getCloudCredentials() {
-  try {
-    const saved = localStorage.getItem('cloud_credentials');
-    if (saved) {
-      const credentials = JSON.parse(saved);
-      if (credentials && credentials.userId && credentials.token) {
-        return credentials;
-      }
-    }
-
-    const userId = localStorage.getItem('cloud_userId');
-    const token = localStorage.getItem('cloud_token');
-    const email = localStorage.getItem('cloud_email');
-    const name = localStorage.getItem('cloud_name');
-
-    if (userId && token) {
-      const credentials = { userId, token, email, name };
-      localStorage.setItem('cloud_credentials', JSON.stringify(credentials));
-      return credentials;
-    }
-
-    return null;
-  } catch (error) {
-    console.error('Credential storage error:', error);
-    clearCloudCredentials();
-    return null;
-  }
+  const userId = localStorage.getItem('cloud_userId');
+  const email = localStorage.getItem('cloud_email');
+  const name = localStorage.getItem('cloud_name');
+  return userId ? { userId, email, name } : null;
 }
 
 function saveCloudCredentials(credentials) {
-  if (!credentials || !credentials.userId || !credentials.token) {
-    throw new Error('Invalid cloud credentials');
-  }
-
-  localStorage.setItem('cloud_credentials', JSON.stringify(credentials));
+  if (!credentials || !credentials.userId) throw new Error('Invalid cloud identity');
   localStorage.setItem('cloud_userId', credentials.userId);
-  localStorage.setItem('cloud_token', credentials.token);
   localStorage.setItem('cloud_email', credentials.email || '');
   localStorage.setItem('cloud_name', credentials.name || '');
+  localStorage.removeItem('cloud_credentials');
+  localStorage.removeItem('cloud_token');
 }
 
 function clearCloudCredentials() {
   localStorage.removeItem('cloud_credentials');
-  localStorage.removeItem('cloud_userId');
   localStorage.removeItem('cloud_token');
+  localStorage.removeItem('cloud_userId');
   localStorage.removeItem('cloud_email');
   localStorage.removeItem('cloud_name');
 }
 
-function isCloudConnected() {
-  const credentials = getCloudCredentials();
-  return !!(credentials && credentials.userId && credentials.token);
-}
+function isCloudConnected() { return !!localStorage.getItem('cloud_userId'); }
 
-// ==========================================
-// LOCAL DELETE TOMBSTONES
-// ==========================================
+function authFetch(url, options = {}) {
+  return fetch(url, { ...options, credentials: 'include' });
+}
 
 function getLocalDeletedTransactionIds() {
   try {
@@ -88,521 +54,148 @@ function getLocalDeletedTransactionIds() {
     return new Set();
   }
 }
-
-function saveLocalDeletedTransactionIds(ids) {
-  localStorage.setItem('deletedTransactionIds', JSON.stringify(Array.from(ids)));
-}
-
-function addLocalDeletedTransactionId(id) {
-  if (!id) return;
-  const ids = getLocalDeletedTransactionIds();
-  ids.add(id);
-  saveLocalDeletedTransactionIds(ids);
-}
-
-function removeLocalDeletedTransactionIds(idsToRemove) {
-  if (!Array.isArray(idsToRemove) || !idsToRemove.length) return;
-  const ids = getLocalDeletedTransactionIds();
-  idsToRemove.forEach(id => ids.delete(id));
-  saveLocalDeletedTransactionIds(ids);
-}
+function saveLocalDeletedTransactionIds(ids) { localStorage.setItem('deletedTransactionIds', JSON.stringify(Array.from(ids))); }
+function addLocalDeletedTransactionId(id) { if (!id) return; const ids = getLocalDeletedTransactionIds(); ids.add(id); saveLocalDeletedTransactionIds(ids); }
+function removeLocalDeletedTransactionIds(idsToRemove) { if (!Array.isArray(idsToRemove) || !idsToRemove.length) return; const ids = getLocalDeletedTransactionIds(); idsToRemove.forEach(id => ids.delete(id)); saveLocalDeletedTransactionIds(ids); }
 
 function handleAuthFailure(message = 'Sesi cloud sudah berakhir. Silakan login kembali.') {
   clearCloudCredentials();
   showAlert(`🔐 ${message}`, 'error');
-  setTimeout(() => {
-    if (typeof updateCloudStatus === 'function') updateCloudStatus();
-  }, 100);
+  setTimeout(() => { if (typeof updateCloudStatus === 'function') updateCloudStatus(); }, 100);
 }
-
-// ==========================================
-// REGISTER
-// ==========================================
 
 async function handleRegister(event) {
   event.preventDefault();
-
   const name = document.getElementById('registerName').value.trim();
   const email = document.getElementById('registerEmail').value.trim();
   const password = document.getElementById('registerPassword').value;
   const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
-
-  if (!name || !email || !password || !passwordConfirm) {
-    showAlert('❌ Semua field harus diisi!', 'error');
-    return;
-  }
-
-  if (password.length < 6) {
-    showAlert('❌ Password minimal 6 karakter!', 'error');
-    return;
-  }
-
-  if (password !== passwordConfirm) {
-    showAlert('❌ Password tidak cocok!', 'error');
-    return;
-  }
-
+  if (!name || !email || !password || !passwordConfirm) return showAlert('❌ Semua field harus diisi!', 'error');
+  if (password.length < 8) return showAlert('❌ Password minimal 8 karakter!', 'error');
+  if (password !== passwordConfirm) return showAlert('❌ Password tidak cocok!', 'error');
   try {
     setLoading(true, 'Registering...');
-
-    const response = await fetch(API_ENDPOINTS.register, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password })
-    });
-
+    const response = await authFetch(API_ENDPOINTS.register, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) });
     const data = await safeJson(response);
-
-    if (!response.ok) {
-      showAlert(`❌ ${data.error || 'Register gagal'}`, 'error');
-      return;
-    }
-
-    saveCloudCredentials({
-      userId: data.userId,
-      token: data.token,
-      name: data.name,
-      email: data.email
-    });
-
+    if (!response.ok) { showAlert(`❌ ${data.error || 'Register gagal'}`, 'error'); return; }
+    saveCloudCredentials({ userId: data.userId, name: data.name, email: data.email });
     showAlert('✅ Register berhasil!', 'success');
-
-    setTimeout(() => {
-      window.location.href = 'index.html';
-    }, 1200);
-  } catch (error) {
-    console.error('Register error:', error);
-    showAlert(`❌ Error: ${error.message}`, 'error');
-  } finally {
-    setLoading(false);
-  }
+    setTimeout(() => { window.location.href = 'index.html'; }, 1200);
+  } catch (error) { console.error('Register error:', error); showAlert(`❌ Error: ${error.message}`, 'error'); }
+  finally { setLoading(false); }
 }
-
-// ==========================================
-// LOGIN
-// ==========================================
 
 async function handleLogin(event) {
   event.preventDefault();
-
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPassword').value;
-
-  if (!email || !password) {
-    showAlert('❌ Email dan password harus diisi!', 'error');
-    return;
-  }
-
+  if (!email || !password) return showAlert('❌ Email dan password harus diisi!', 'error');
   try {
     setLoading(true, 'Logging in...');
-
-    const response = await fetch(API_ENDPOINTS.login, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-
+    const response = await authFetch(API_ENDPOINTS.login, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
     const data = await safeJson(response);
-
-    if (!response.ok) {
-      showAlert(`❌ ${data.error || 'Login gagal'}`, 'error');
-      return;
-    }
-
-    saveCloudCredentials({
-      userId: data.userId,
-      token: data.token,
-      name: data.name,
-      email: data.email
-    });
-
+    if (!response.ok) { showAlert(`❌ ${data.error || 'Login gagal'}`, 'error'); return; }
+    saveCloudCredentials({ userId: data.userId, name: data.name, email: data.email });
     showAlert(`✅ Login berhasil! Selamat datang, ${data.name}`, 'success');
-
-    setTimeout(() => {
-      window.location.href = 'index.html';
-    }, 1200);
-  } catch (error) {
-    console.error('Login error:', error);
-    showAlert(`❌ Login gagal: ${error.message}`, 'error');
-  } finally {
-    setLoading(false);
-  }
+    setTimeout(() => { window.location.href = 'index.html'; }, 1200);
+  } catch (error) { console.error('Login error:', error); showAlert(`❌ Login gagal: ${error.message}`, 'error'); }
+  finally { setLoading(false); }
 }
-
-// ==========================================
-// LOGOUT
-// ==========================================
 
 async function handleLogout() {
   if (!confirm('Yakin logout? Data lokal tetap aman.')) return;
-
-  const credentials = getCloudCredentials();
-
-  try {
-    if (credentials?.token) {
-      await fetch(API_ENDPOINTS.logout, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${credentials.token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-    }
-  } catch (error) {
-    console.warn('Server logout failed; clearing local session:', error);
-  } finally {
-    clearCloudCredentials();
-    location.reload();
-  }
+  try { await authFetch(API_ENDPOINTS.logout, { method: 'POST', headers: { 'Content-Type': 'application/json' } }); }
+  catch (error) { console.warn('Server logout failed; clearing local identity:', error); }
+  finally { clearCloudCredentials(); location.reload(); }
 }
-
-// ==========================================
-// SYNC
-// ==========================================
 
 async function syncToCloud() {
   const credentials = getCloudCredentials();
-
-  if (!credentials) {
-    showAlert('❌ Anda harus login terlebih dahulu', 'error');
-    return;
-  }
-
+  if (!credentials) return showAlert('❌ Anda harus login terlebih dahulu', 'error');
   try {
     setLoading(true, 'Syncing ke cloud...');
-
     const deletedIds = getLocalDeletedTransactionIds();
-    const allTransactions = JSON.parse(
-      localStorage.getItem('transactions') || '[]'
-    );
+    const allTransactions = JSON.parse(localStorage.getItem('transactions') || '[]');
     const transactions = allTransactions.filter(t => t?.id && !deletedIds.has(t.id));
-
-    const response = await fetch(API_ENDPOINTS.saveTransactions, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${credentials.token}`
-      },
-      body: JSON.stringify({
-        userId: credentials.userId,
-        transactions
-      })
-    });
-
+    const response = await authFetch(API_ENDPOINTS.saveTransactions, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: credentials.userId, transactions }) });
     const data = await safeJson(response);
-
-    if (response.status === 401) {
-      handleAuthFailure(data.error);
-      return;
-    }
-
-    if (!response.ok) {
-      showAlert(`❌ ${data.error || 'Sync gagal'}`, 'error');
-      return;
-    }
-
-    if (Array.isArray(data.deletedIds)) {
-      data.deletedIds.forEach(id => deletedIds.add(id));
-      saveLocalDeletedTransactionIds(deletedIds);
-    }
-
+    if (response.status === 401) return handleAuthFailure(data.error);
+    if (!response.ok) return showAlert(`❌ ${data.error || 'Sync gagal'}`, 'error');
+    if (Array.isArray(data.deletedIds)) { data.deletedIds.forEach(id => deletedIds.add(id)); saveLocalDeletedTransactionIds(deletedIds); }
     showAlert(`✅ Synced! ${data.count} transaksi tersimpan di cloud`, 'success');
     loadStats();
-  } catch (error) {
-    console.error('Sync error:', error);
-    showAlert(`❌ Sync gagal: ${error.message}`, 'error');
-  } finally {
-    setLoading(false);
-  }
+  } catch (error) { console.error('Sync error:', error); showAlert(`❌ Sync gagal: ${error.message}`, 'error'); }
+  finally { setLoading(false); }
 }
-
-// ==========================================
-// LOAD FROM CLOUD
-// ==========================================
 
 async function loadFromCloud() {
   const credentials = getCloudCredentials();
-
-  if (!credentials) {
-    showAlert('❌ Anda harus login terlebih dahulu', 'error');
-    return;
-  }
-
+  if (!credentials) return showAlert('❌ Anda harus login terlebih dahulu', 'error');
   try {
     setLoading(true, 'Memuat dari cloud...');
-
-    const response = await fetch(
-      API_ENDPOINTS.getTransactions(credentials.userId),
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${credentials.token}`
-        }
-      }
-    );
-
+    const response = await authFetch(API_ENDPOINTS.getTransactions(credentials.userId), { method: 'GET' });
     const data = await safeJson(response);
-
-    if (response.status === 401) {
-      handleAuthFailure(data.error);
-      return;
-    }
-
-    if (!response.ok) {
-      showAlert(`❌ ${data.error || 'Load gagal'}`, 'error');
-      return;
-    }
-
-    const cloudTransactions = Array.isArray(data.transactions)
-      ? data.transactions
-      : [];
-
-    const cloudDeletedIds = Array.isArray(data.deletedIds)
-      ? data.deletedIds.filter(Boolean)
-      : [];
-
+    if (response.status === 401) return handleAuthFailure(data.error);
+    if (!response.ok) return showAlert(`❌ ${data.error || 'Load gagal'}`, 'error');
+    const cloudTransactions = Array.isArray(data.transactions) ? data.transactions : [];
+    const cloudDeletedIds = Array.isArray(data.deletedIds) ? data.deletedIds.filter(Boolean) : [];
     const localDeletedIds = getLocalDeletedTransactionIds();
     cloudDeletedIds.forEach(id => localDeletedIds.add(id));
     saveLocalDeletedTransactionIds(localDeletedIds);
-
-    const localTransactions = JSON.parse(
-      localStorage.getItem('transactions') || '[]'
-    );
-
+    const localTransactions = JSON.parse(localStorage.getItem('transactions') || '[]');
     const cleanLocal = localTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
     const cleanCloud = cloudTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
     const merged = mergeTransactions(cleanLocal, cleanCloud, localDeletedIds);
-
     localStorage.setItem('transactions', JSON.stringify(merged));
-
     showAlert(`✅ Loaded! ${merged.length} transaksi`, 'success');
     loadStats();
-  } catch (error) {
-    console.error('Load error:', error);
-    showAlert(`❌ Load gagal: ${error.message}`, 'error');
-  } finally {
-    setLoading(false);
-  }
+  } catch (error) { console.error('Load error:', error); showAlert(`❌ Load gagal: ${error.message}`, 'error'); }
+  finally { setLoading(false); }
 }
-
-// ==========================================
-// STATS
-// ==========================================
 
 async function loadStats() {
   const credentials = getCloudCredentials();
   if (!credentials) return;
-
   try {
-    const response = await fetch(
-      API_ENDPOINTS.getStats(credentials.userId),
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${credentials.token}`
-        }
-      }
-    );
-
+    const response = await authFetch(API_ENDPOINTS.getStats(credentials.userId), { method: 'GET' });
     const data = await safeJson(response);
-
-    if (response.status === 401) {
-      handleAuthFailure(data.error);
-      return;
-    }
-
-    if (!response.ok) {
-      console.error('Stats error:', data);
-      return;
-    }
-
+    if (response.status === 401) return handleAuthFailure(data.error);
+    if (!response.ok) return;
     const stats = data.stats || data;
-    if (!stats) return;
-
     const userName = document.getElementById('userName');
     if (userName) userName.textContent = credentials.name || '';
-
     const container = document.getElementById('statsContainer');
     if (!container) return;
-
-    container.innerHTML = `
-      <div class="stat-card">
-        <div class="label">💰 Total Pemasukan</div>
-        <div class="value">${formatRupiah(stats.totalIncome)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">💸 Total Pengeluaran</div>
-        <div class="value">${formatRupiah(stats.totalExpense)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">📊 Saldo</div>
-        <div class="value">${formatRupiah(stats.balance)}</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">📝 Transaksi</div>
-        <div class="value">${Number(stats.transactionCount) || 0}</div>
-      </div>
-    `;
-  } catch (error) {
-    console.error('Failed to load stats:', error);
-  }
+    container.innerHTML = `<div class="stat-card"><div class="label">💰 Total Pemasukan</div><div class="value">${formatRupiah(stats.totalIncome)}</div></div><div class="stat-card"><div class="label">💸 Total Pengeluaran</div><div class="value">${formatRupiah(stats.totalExpense)}</div></div><div class="stat-card"><div class="label">📊 Saldo</div><div class="value">${formatRupiah(stats.balance)}</div></div><div class="stat-card"><div class="label">📝 Transaksi</div><div class="value">${Number(stats.transactionCount) || 0}</div></div>`;
+  } catch (error) { console.error('Failed to load stats:', error); }
 }
-
-// ==========================================
-// PROFILE / SESSION CHECK
-// ==========================================
 
 async function validateCloudSession() {
   const credentials = getCloudCredentials();
   if (!credentials) return false;
-
   try {
-    const response = await fetch(API_ENDPOINTS.profile, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${credentials.token}`
-      }
-    });
-
+    const response = await authFetch(API_ENDPOINTS.profile, { method: 'GET' });
     const data = await safeJson(response);
-
-    if (response.status === 401) {
-      handleAuthFailure(data.error);
-      return false;
-    }
-
+    if (response.status === 401) { handleAuthFailure(data.error); return false; }
     if (!response.ok) return false;
-
-    if (data.name || data.email) {
-      saveCloudCredentials({
-        ...credentials,
-        name: data.name || credentials.name,
-        email: data.email || credentials.email
-      });
-    }
-
+    saveCloudCredentials({ userId: data.userId, name: data.name, email: data.email });
     return true;
-  } catch (error) {
-    console.warn('Session validation failed:', error);
-    return false;
-  }
+  } catch (error) { console.warn('Session validation failed:', error); return false; }
 }
-
-// ==========================================
-// UI
-// ==========================================
 
 function toggleForm() {
-  const loginForm = document.getElementById('loginForm');
-  const registerForm = document.getElementById('registerForm');
-
+  const loginForm = document.getElementById('loginForm'); const registerForm = document.getElementById('registerForm');
   if (!loginForm || !registerForm) return;
-
-  if (loginForm.style.display === 'none') {
-    loginForm.style.display = 'block';
-    registerForm.style.display = 'none';
-  } else {
-    loginForm.style.display = 'none';
-    registerForm.style.display = 'block';
-  }
-
+  if (loginForm.style.display === 'none') { loginForm.style.display = 'block'; registerForm.style.display = 'none'; } else { loginForm.style.display = 'none'; registerForm.style.display = 'block'; }
   hideAlert();
 }
-
-function showAlert(message, type = 'info') {
-  const alert = document.getElementById('alert');
-  if (!alert) {
-    console.log(message);
-    return;
-  }
-
-  alert.className = `alert ${type} show`;
-  alert.textContent = message;
-
-  setTimeout(() => hideAlert(), 5000);
-}
-
-function hideAlert() {
-  const alert = document.getElementById('alert');
-  if (alert) alert.classList.remove('show');
-}
-
-function setLoading(isLoading, text = 'Loading...') {
-  const loginBtn = document.getElementById('loginBtn');
-  const registerBtn = document.getElementById('registerBtn');
-  const loginLoading = document.getElementById('loginLoading');
-  const registerLoading = document.getElementById('registerLoading');
-
-  if (loginBtn) loginBtn.disabled = isLoading;
-  if (registerBtn) registerBtn.disabled = isLoading;
-
-  if (loginLoading) {
-    loginLoading.style.display = isLoading ? 'block' : 'none';
-    if (isLoading) loginLoading.innerHTML = `<span class="spinner"></span> ${text}`;
-  }
-
-  if (registerLoading) {
-    registerLoading.style.display = isLoading ? 'block' : 'none';
-    if (isLoading) registerLoading.innerHTML = `<span class="spinner"></span> ${text}`;
-  }
-}
-
-function goToApp() {
-  window.location.href = './index.html';
-}
-
-// ==========================================
-// UTILITIES
-// ==========================================
-
-async function safeJson(response) {
-  try {
-    return await response.json();
-  } catch {
-    return {};
-  }
-}
-
-function formatRupiah(amount) {
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
-  }).format(Number(amount) || 0);
-}
-
-function mergeTransactions(local, cloud, deletedIds = new Set()) {
-  const merged = new Map();
-
-  cloud.forEach(transaction => {
-    if (transaction?.id && !deletedIds.has(transaction.id)) {
-      merged.set(transaction.id, transaction);
-    }
-  });
-
-  local.forEach(transaction => {
-    if (transaction?.id && !deletedIds.has(transaction.id)) {
-      const existing = merged.get(transaction.id);
-      if (!existing || new Date(transaction.updatedAt || 0) >= new Date(existing.updatedAt || 0)) {
-        merged.set(transaction.id, transaction);
-      }
-    }
-  });
-
-  return Array.from(merged.values()).sort(
-    (a, b) => new Date(b.date) - new Date(a.date)
-  );
-}
-
-// ==========================================
-// INIT
-// ==========================================
-
-window.addEventListener('DOMContentLoaded', () => {
-  if (isCloudConnected()) {
-    validateCloudSession().then(valid => {
-      if (valid) loadStats();
-    });
-  }
-});
+function showAlert(message, type = 'info') { const alert = document.getElementById('alert'); if (!alert) return console.log(message); alert.className = `alert ${type} show`; alert.textContent = message; setTimeout(() => hideAlert(), 5000); }
+function hideAlert() { const alert = document.getElementById('alert'); if (alert) alert.classList.remove('show'); }
+function setLoading(isLoading, text = 'Loading...') { const loginBtn = document.getElementById('loginBtn'); const registerBtn = document.getElementById('registerBtn'); const loginLoading = document.getElementById('loginLoading'); const registerLoading = document.getElementById('registerLoading'); if (loginBtn) loginBtn.disabled = isLoading; if (registerBtn) registerBtn.disabled = isLoading; if (loginLoading) { loginLoading.style.display = isLoading ? 'block' : 'none'; if (isLoading) loginLoading.innerHTML = `<span class="spinner"></span> ${text}`; } if (registerLoading) { registerLoading.style.display = isLoading ? 'block' : 'none'; if (isLoading) registerLoading.innerHTML = `<span class="spinner"></span> ${text}`; } }
+function goToApp() { window.location.href = './index.html'; }
+async function safeJson(response) { try { return await response.json(); } catch { return {}; } }
+function mergeTransactions(local, cloud, deletedIds = new Set()) { const merged = new Map(); cloud.forEach(t => { if (t?.id && !deletedIds.has(t.id)) merged.set(t.id, t); }); local.forEach(t => { if (t?.id && !deletedIds.has(t.id)) { const old = merged.get(t.id); if (!old || getTimestamp(t) >= getTimestamp(old)) merged.set(t.id, t); } }); return Array.from(merged.values()).sort((a, b) => new Date(b.date) - new Date(a.date)); }
+function getTimestamp(t) { const value = t && (t.updatedAt || t.createdAt); const ts = value ? Date.parse(value) : 0; return Number.isFinite(ts) ? ts : 0; }
+function syncToCloudFromApp() { return syncToCloud(); }
+function loadFromCloudToApp() { return loadFromCloud(); }
+function logoutCloud() { return handleLogout(); }
