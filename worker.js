@@ -17,7 +17,7 @@ const RATE_LIMIT_PREFIX = 'rate:';
 
 export default {
   async fetch(request, env) {
-    const corsHeaders = getCorsHeaders();
+    const corsHeaders = getCorsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
     const url = new URL(request.url);
@@ -349,14 +349,35 @@ function getTimestamp(transaction) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-function getCorsHeaders() {
-  return {
-    'Access-Control-Allow-Origin': '*',
+function getCorsHeaders(request, env) {
+  const requestOrigin = request.headers.get('Origin');
+  const configuredOrigins = env.ALLOWED_ORIGINS
+    ? env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean)
+    : [];
+
+  const defaultOrigins = [
+    'https://vixora.my.id',
+    'https://www.vixora.my.id',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:5174'
+  ];
+
+  const allowedOrigins = configuredOrigins.length ? configuredOrigins : defaultOrigins;
+  const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
     'Content-Type': 'application/json',
+    'Vary': 'Origin'
   };
+
+  if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+    headers['Access-Control-Allow-Origin'] = requestOrigin;
+  }
+
+  return headers;
 }
 
 function jsonResponse(data, status = 200, headers = {}) {
