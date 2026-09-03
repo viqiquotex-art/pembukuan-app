@@ -14,6 +14,8 @@ const API_ENDPOINTS = {
   export: userId => `${API_BASE_URL}/api/export/${encodeURIComponent(userId)}`
 };
 
+const SYNC_SNAPSHOT_KEY = 'cloud_sync_snapshot';
+
 function getCloudCredentials() {
   const userId = localStorage.getItem('cloud_userId');
   const email = localStorage.getItem('cloud_email');
@@ -34,6 +36,7 @@ function clearCloudCredentials() {
   localStorage.removeItem('cloud_userId');
   localStorage.removeItem('cloud_email');
   localStorage.removeItem('cloud_name');
+  localStorage.removeItem(SYNC_SNAPSHOT_KEY);
 }
 function isCloudConnected() { return !!localStorage.getItem('cloud_userId'); }
 function authFetch(url, options = {}) { return fetch(url, { ...options, credentials: 'include' }); }
@@ -55,6 +58,39 @@ function getLocalDeletedTransactionIds() {
 function saveLocalDeletedTransactionIds(ids) { localStorage.setItem('deletedTransactionIds', JSON.stringify(Array.from(ids))); }
 function addLocalDeletedTransactionId(id) { if (!id) return; const ids = getLocalDeletedTransactionIds(); ids.add(id); saveLocalDeletedTransactionIds(ids); }
 function removeLocalDeletedTransactionIds(idsToRemove) { if (!Array.isArray(idsToRemove) || !idsToRemove.length) return; const ids = getLocalDeletedTransactionIds(); idsToRemove.forEach(id => ids.delete(id)); saveLocalDeletedTransactionIds(ids); }
+
+function readSyncSnapshot(userId) {
+  try {
+    const raw = localStorage.getItem(SYNC_SNAPSHOT_KEY);
+    const snapshot = raw ? JSON.parse(raw) : null;
+    return snapshot && snapshot.userId === userId && Array.isArray(snapshot.transactions) ? snapshot.transactions : [];
+  } catch (error) { return []; }
+}
+function writeSyncSnapshot(userId, transactions) {
+  try {
+    localStorage.setItem(SYNC_SNAPSHOT_KEY, JSON.stringify({ userId, transactions: Array.isArray(transactions) ? transactions : [], savedAt: new Date().toISOString() }));
+  } catch (error) { console.warn('Sync snapshot save failed:', error); }
+}
+function transactionSignature(transaction) {
+  if (!transaction || typeof transaction !== 'object') return '';
+  return JSON.stringify({
+    id: transaction.id || '',
+    type: transaction.type || '',
+    category: transaction.category || '',
+    amount: Number(transaction.amount) || 0,
+    date: transaction.date || '',
+    description: transaction.description || '',
+    createdAt: transaction.createdAt || '',
+    updatedAt: transaction.updatedAt || ''
+  });
+}
+function getDeltaTransactions(localTransactions, snapshotTransactions, deletedIds) {
+  const snapshot = new Map(snapshotTransactions.filter(t => t?.id).map(t => [t.id, transactionSignature(t)]));
+  return localTransactions.filter(transaction => {
+    if (!transaction?.id || deletedIds.has(transaction.id)) return false;
+    return snapshot.get(transaction.id) !== transactionSignature(transaction);
+  });
+}
 
 function handleAuthFailure(message = 'Sesi cloud sudah berakhir. Silakan login kembali.') {
   clearCloudCredentials();
@@ -118,7 +154,8 @@ async function syncToCloud() {
       setLoading(true, 'Syncing ke cloud...');
       const deletedIds = getLocalDeletedTransactionIds();
       const allTransactions = parseLocalTransactions();
-      const transactions = allTransactions.filter(t => t?.id && !deletedIds.has(t.id));
+      const snapshot = readSyncSnapshot(credentials.userId);
+      const transactions = getDeltaTransactions(allTransactions, snapshot, deletedIds);
       const response = await authFetch(API_ENDPOINTS.saveTransactions, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: credentials.userId, transactions }) });
       const data = await safeJson(response);
       if (response.status === 401) { handleAuthFailure(data.error); return false; }
@@ -128,9 +165,10 @@ async function syncToCloud() {
       const serverTransactions = Array.isArray(data.transactions) ? data.transactions : [];
       const merged = mergeTransactions(parseLocalTransactions(), serverTransactions, deletedIds);
       localStorage.setItem('transactions', JSON.stringify(merged));
+      writeSyncSnapshot(credentials.userId, serverTransactions);
       if (typeof renderHistory === 'function') renderHistory();
       if (typeof renderRecap === 'function') renderRecap();
-      showAlert(`✅ Sync selesai! ${merged.length} transaksi`, 'success');
+      showAlert(`✅ Sync selesai! ${merged.length} transaksi (${transactions.length} perubahan dikirim)`, 'success');
       loadStats();
       return true;
     } catch (error) { console.error('Sync error:', error); showAlert(`❌ Sync gagal: ${error.message}`, 'error'); return false; }
@@ -159,6 +197,7 @@ async function loadFromCloud() {
     const cleanCloud = cloudTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
     const merged = mergeTransactions(cleanLocal, cleanCloud, localDeletedIds);
     localStorage.setItem('transactions', JSON.stringify(merged));
+    writeSyncSnapshot(credentials.userId, cleanCloud);
     if (typeof renderHistory === 'function') renderHistory();
     if (typeof renderRecap === 'function') renderRecap();
     showAlert(`✅ Loaded! ${merged.length} transaksi`, 'success');
