@@ -8,6 +8,9 @@
   let autoSyncRunning = false;
   let autoSyncQueued = false;
   const DELETE_QUEUE_PREFIX = 'pendingCloudDeletes:';
+  const initialCloudUserId = localStorage.getItem('cloud_userId');
+  let sessionWasAuthenticated = !!initialCloudUserId;
+  let sessionReloaded = false;
 
   function getActiveCredentials() {
     if (typeof isCloudConnected !== 'function' || !isCloudConnected()) return null;
@@ -69,11 +72,12 @@
 
   async function retryPendingCloudDeletes() {
     const credentials = getActiveCredentials();
-    if (!credentials?.userId) return 0;
+    if (!credentials?.userId) return { completed: 0, pending: 0, authFailed: false };
     const queue = getPendingCloudDeletes(credentials.userId);
-    if (!queue.size) return 0;
+    if (!queue.size) return { completed: 0, pending: 0, authFailed: false };
 
     let completed = 0;
+    let authFailed = false;
     for (const id of Array.from(queue)) {
       try {
         const success = await deleteFromCloud(credentials.userId, id);
@@ -81,13 +85,18 @@
           removeQueuedCloudDelete(credentials.userId, id);
           completed += 1;
         } else if (!isCloudConnected()) {
+          authFailed = true;
           break;
         }
       } catch (error) {
         console.error('Pending cloud delete retry error:', error);
       }
     }
-    return completed;
+    return {
+      completed,
+      pending: getPendingCloudDeletes(credentials.userId).size,
+      authFailed
+    };
   }
 
   async function deleteTransaction(id) {
@@ -102,8 +111,8 @@
       return;
     }
 
-    // Tombstone is written before the local record is removed. This prevents a
-    // later sync/load from resurrecting the transaction.
+    // Tombstone is written before local removal so a later cloud load cannot
+    // resurrect the transaction while the delete is waiting for cloud retry.
     if (typeof addLocalDeletedTransactionId === 'function') addLocalDeletedTransactionId(id);
     if (typeof saveTransactions === 'function') saveTransactions(transactions.filter(t => t && t.id !== id));
     if (typeof renderHistory === 'function') renderHistory();
@@ -114,8 +123,6 @@
       return;
     }
 
-    // Queue first. A successful request removes the queue entry; a network
-    // failure leaves it pending for the next sync, so cloud deletion is retryable.
     queueCloudDelete(credentials.userId, id);
 
     try {
@@ -133,6 +140,18 @@
     }
   }
 
+  // Wrap the original cloud sync so the pending-delete queue is flushed on
+  // BOTH manual Sync and automatic Sync. This closes the previous gap where
+  // only autoSync retried deletions.
+  const originalSyncToCloud = window.syncToCloud;
+  if (typeof originalSyncToCloud === 'function') {
+    window.syncToCloud = async function (...args) {
+      const retryResult = await retryPendingCloudDeletes();
+      if (retryResult.authFailed) return false;
+      return originalSyncToCloud.apply(this, args);
+    };
+  }
+
   function autoSyncToCloud() {
     if (!getActiveCredentials()) return;
     clearTimeout(autoSyncTimer);
@@ -143,8 +162,9 @@
       }
       autoSyncRunning = true;
       try {
-        await retryPendingCloudDeletes();
-        if (typeof syncToCloud === 'function' && getActiveCredentials()) await syncToCloud();
+        if (typeof window.syncToCloud === 'function' && getActiveCredentials()) {
+          await window.syncToCloud();
+        }
       } finally {
         autoSyncRunning = false;
         if (autoSyncQueued) {
@@ -153,6 +173,29 @@
         }
       }
     }, 700);
+  }
+
+  // If an authenticated session is invalidated by a 401 inside cloud.js,
+  // cloud.js clears the credentials but previously left the old user's data
+  // rendered in memory. Reloading switches hardening.js back to the offline
+  // bucket and prevents the stale authenticated UI from remaining visible.
+  if (sessionWasAuthenticated) {
+    const sessionGuard = setInterval(() => {
+      if (sessionReloaded) {
+        clearInterval(sessionGuard);
+        return;
+      }
+      const currentUserId = localStorage.getItem('cloud_userId');
+      if (!currentUserId && sessionWasAuthenticated) {
+        sessionReloaded = true;
+        clearInterval(sessionGuard);
+        location.reload();
+        return;
+      }
+      if (currentUserId && currentUserId !== initialCloudUserId) {
+        sessionWasAuthenticated = true;
+      }
+    }, 1000);
   }
 
   window.deleteTransaction = deleteTransaction;
