@@ -176,24 +176,25 @@ async function handleSaveTransactions(request, env, corsHeaders) {
       if (!transaction.updatedAt || Number.isNaN(Date.parse(transaction.updatedAt))) transaction.updatedAt = transaction.createdAt && !Number.isNaN(Date.parse(transaction.createdAt)) ? transaction.createdAt : now;
     }
 
+    const deletedIds = new Set(await getDeletedIds(userId, env));
     const key = `transactions:${userId}`;
     const existingRaw = await env.PEMBUKUAN_KV.get(key);
     const existing = existingRaw ? JSON.parse(existingRaw) : [];
-    const incomingById = new Map(transactions.map(t => [t.id, t]));
     const merged = new Map();
 
     for (const oldTx of existing) {
-      if (oldTx && oldTx.id) merged.set(oldTx.id, oldTx);
+      if (oldTx && oldTx.id && !deletedIds.has(oldTx.id)) merged.set(oldTx.id, oldTx);
     }
     for (const newTx of transactions) {
+      if (deletedIds.has(newTx.id)) continue;
       const oldTx = merged.get(newTx.id);
       if (!oldTx || getTimestamp(newTx) >= getTimestamp(oldTx)) merged.set(newTx.id, newTx);
     }
 
-    // Do not treat missing IDs as deletions. Deletions must use the DELETE endpoint.
+    // Do not treat missing IDs as deletions. Deletions use the DELETE endpoint and tombstones.
     const result = Array.from(merged.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
     await env.PEMBUKUAN_KV.put(key, JSON.stringify(result));
-    return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, transactions: result }, 200, corsHeaders);
+    return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders);
   } catch (error) {
     console.error('Save transactions error:', error);
     return jsonResponse({ error: 'Failed to save transactions' }, 500, corsHeaders);
@@ -205,9 +206,13 @@ async function handleGetTransactions(userId, request, env, corsHeaders) {
     const tokenOwner = await requireOwner(request, env);
     if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
     if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: cannot access other user data' }, 403, corsHeaders);
+    const deletedIds = await getDeletedIds(userId, env);
+    const deletedSet = new Set(deletedIds);
     const data = await env.PEMBUKUAN_KV.get(`transactions:${userId}`);
-    const transactions = data ? JSON.parse(data) : [];
-    return jsonResponse({ success: true, userId, transactions, count: transactions.length }, 200, corsHeaders);
+    const rawTransactions = data ? JSON.parse(data) : [];
+    const transactions = rawTransactions.filter(t => t && t.id && !deletedSet.has(t.id));
+    if (transactions.length !== rawTransactions.length) await env.PEMBUKUAN_KV.put(`transactions:${userId}`, JSON.stringify(transactions));
+    return jsonResponse({ success: true, userId, transactions, count: transactions.length, deletedIds }, 200, corsHeaders);
   } catch (error) {
     console.error('Get transactions error:', error);
     return jsonResponse({ error: 'Failed to get transactions' }, 500, corsHeaders);
@@ -219,17 +224,33 @@ async function handleDeleteTransaction(userId, transactionId, request, env, cors
     const tokenOwner = await requireOwner(request, env);
     if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
     if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders);
+    if (!transactionId) return jsonResponse({ error: 'Transaction ID is required' }, 400, corsHeaders);
+
+    const deletedAt = new Date().toISOString();
+    await env.PEMBUKUAN_KV.put(`deleted:${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt }));
+
     const key = `transactions:${userId}`;
     const data = await env.PEMBUKUAN_KV.get(key);
     const transactions = data ? JSON.parse(data) : [];
     const filtered = transactions.filter(t => t.id !== transactionId);
-    if (filtered.length === transactions.length) return jsonResponse({ error: 'Transaction not found' }, 404, corsHeaders);
-    await env.PEMBUKUAN_KV.put(key, JSON.stringify(filtered));
-    return jsonResponse({ success: true, message: 'Transaction deleted', transactionId }, 200, corsHeaders);
+    if (filtered.length !== transactions.length) await env.PEMBUKUAN_KV.put(key, JSON.stringify(filtered));
+
+    return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders);
   } catch (error) {
     console.error('Delete transaction error:', error);
     return jsonResponse({ error: 'Failed to delete transaction' }, 500, corsHeaders);
   }
+}
+
+async function getDeletedIds(userId, env) {
+  const ids = [];
+  let cursor;
+  do {
+    const page = await env.PEMBUKUAN_KV.list({ prefix: `deleted:${userId}:`, cursor });
+    for (const key of page.keys) ids.push(key.name.slice(`deleted:${userId}:`.length));
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return ids;
 }
 
 async function handleGetStats(userId, request, env, corsHeaders) {
@@ -237,8 +258,9 @@ async function handleGetStats(userId, request, env, corsHeaders) {
     const tokenOwner = await requireOwner(request, env);
     if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
     if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders);
+    const deletedIds = new Set(await getDeletedIds(userId, env));
     const data = await env.PEMBUKUAN_KV.get(`transactions:${userId}`);
-    const transactions = data ? JSON.parse(data) : [];
+    const transactions = (data ? JSON.parse(data) : []).filter(t => t && !deletedIds.has(t.id));
     const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const expense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const stats = { totalIncome: income, totalExpense: expense, balance: income - expense, transactionCount: transactions.length };
@@ -254,8 +276,9 @@ async function handleExport(userId, request, env, corsHeaders) {
     const tokenOwner = await requireOwner(request, env);
     if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
     if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders);
+    const deletedIds = new Set(await getDeletedIds(userId, env));
     const data = await env.PEMBUKUAN_KV.get(`transactions:${userId}`);
-    const transactions = data ? JSON.parse(data) : [];
+    const transactions = (data ? JSON.parse(data) : []).filter(t => t && !deletedIds.has(t.id));
     return jsonResponse({ success: true, userId, transactions, count: transactions.length }, 200, corsHeaders);
   } catch (error) {
     console.error('Export error:', error);
