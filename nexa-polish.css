@@ -258,3 +258,279 @@ input:focus, select:focus, textarea:focus {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* =========================================================
+   ADMIN PANEL — RESPONSIVE MOBILE LAYOUT
+   Keeps admin logic untouched; only changes presentation.
+   ========================================================= */
+
+.admin-shell,
+.admin-shell .content-card,
+.admin-shell .admin-toolbar,
+.admin-shell .admin-search,
+.admin-shell .admin-table-wrap {
+  min-width: 0;
+}
+
+.admin-shell .content-card {
+  overflow: hidden;
+}
+
+.admin-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.admin-stat {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.admin-stat .value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-toolbar {
+  align-items: flex-start;
+}
+
+.admin-toolbar > div:first-child {
+  min-width: 0;
+}
+
+.admin-toolbar h3,
+.admin-toolbar p {
+  overflow-wrap: anywhere;
+}
+
+.admin-search {
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.admin-search input {
+  min-width: 180px;
+}
+
+.admin-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-table {
+  min-width: 720px;
+}
+
+@media (max-width: 760px) {
+  .admin-shell {
+    gap: 12px;
+  }
+
+  .admin-shell .content-card {
+    padding: 16px;
+    border-radius: 18px;
+  }
+
+  .admin-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .admin-stat {
+    padding: 15px;
+    border-radius: 13px;
+  }
+
+  .admin-stat .label {
+    font-size: 9px;
+    line-height: 1.35;
+  }
+
+  .admin-stat .value {
+    font-size: 22px;
+    margin-top: 5px;
+  }
+
+  .admin-toolbar {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .admin-toolbar > div:first-child {
+    width: 100%;
+  }
+
+  .admin-search {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .admin-search input {
+    width: 100%;
+    min-width: 0;
+    grid-column: 1 / -1;
+  }
+
+  .admin-search .btn {
+    min-width: 0;
+    width: 100%;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .admin-table-wrap {
+    overflow: visible;
+  }
+
+  .admin-table {
+    width: 100%;
+    min-width: 0;
+    display: block;
+  }
+
+  .admin-table thead {
+    display: none;
+  }
+
+  .admin-table tbody,
+  .admin-table tr {
+    display: block;
+    width: 100%;
+  }
+
+  .admin-table tr {
+    margin-bottom: 10px;
+    padding: 12px;
+    border: 1px solid rgba(127,127,127,.13);
+    border-radius: 14px;
+    background: rgba(250,250,255,.72);
+  }
+
+  .admin-table tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .admin-table td {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 9px 0;
+    border-bottom: 1px solid rgba(127,127,127,.09);
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-table td:last-child {
+    border-bottom: 0;
+    padding-bottom: 2px;
+  }
+
+  .admin-table td::before {
+    flex: 0 0 92px;
+    text-align: left;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    opacity: .58;
+  }
+
+  .admin-table td:nth-child(1)::before { content: "Pengguna"; }
+  .admin-table td:nth-child(2)::before { content: "Email"; }
+  .admin-table td:nth-child(3)::before { content: "Terdaftar"; }
+  .admin-table td:nth-child(4)::before { content: "Login"; }
+  .admin-table td:nth-child(5)::before { content: "Role"; }
+  .admin-table td:nth-child(6)::before { content: "Aksi"; }
+
+  .admin-table td > * {
+    max-width: calc(100% - 104px);
+  }
+
+  .admin-table td:nth-child(1) > div {
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  .admin-table .sub {
+    word-break: break-all;
+  }
+
+  .admin-table td:nth-child(6) {
+    align-items: center;
+  }
+
+  .admin-table td:nth-child(6) .btn {
+    min-width: 78px;
+  }
+
+  .admin-status {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 420px) {
+  .app-shell { padding-left: 9px; padding-right: 9px; }
+
+  .header {
+    padding: 14px;
+  }
+
+  .app-brand {
+    gap: 10px;
+  }
+
+  .header-left h1 {
+    font-size: 20px;
+  }
+
+  .cloud-status {
+    font-size: 8px;
+  }
+
+  .tabs {
+    margin-left: -1px;
+    margin-right: -1px;
+  }
+
+  .page-heading,
+  .form-section,
+  .content-card {
+    padding: 16px;
+  }
+
+  .admin-summary {
+    gap: 8px;
+  }
+
+  .admin-stat {
+    padding: 13px;
+  }
+
+  .admin-stat .value {
+    font-size: 20px;
+  }
+
+  .admin-search {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-search input,
+  .admin-search .btn {
+    grid-column: 1;
+  }
+
+  .admin-table td::before {
+    flex-basis: 78px;
+  }
+
+  .admin-table td > * {
+    max-width: calc(100% - 90px);
+  }
+}
