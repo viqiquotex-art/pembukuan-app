@@ -41,7 +41,7 @@
         <div class="content-card" style="margin-bottom:20px;"><div class="card-heading"><div><h3>📤 Export Laporan</h3><p>Pilih format laporan yang ingin Anda simpan.</p></div></div><div class="form-actions" style="display:flex;gap:12px;flex-wrap:wrap;"><button class="btn btn-primary" type="button" onclick="exportRecapPDF()">📄 Export PDF</button><button class="btn btn-primary" type="button" onclick="exportRecapExcel()">📊 Export Excel</button></div></div>
         <div class="recap-grid" id="recapGrid"></div>
       </section>
-      <section id="cloud" class="tab-content"><div class="page-heading"><div><span class="section-eyebrow">BACKUP & SYNC</span><h2>Cloud Storage</h2><p>Simpan dan sinkronkan data Anda secara online.</p></div></div><div id="cloudPanel"></div></section>
+      <section id="cloud" class="tab-content"><div class="page-heading"><div><span class="section-eyebrow">BACKUP & SYNC</span><h2>Cloud Storage</h2><p>Simpan dan sinkronkan data Anda secara online.</p></div><div></div></div><div id="cloudPanel"></div></section>
     </main>
     <footer class="app-footer"><span>NEXA</span><span class="footer-dot">•</span><span>Asisten Pembukuan Keuangan</span></footer>
   </div>
@@ -50,6 +50,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="./app.js"></script>
   <script src="./sync.js"></script>
+  <script src="./hardening.js"></script>
   <script>
     function formatNominalInput(value) { const digits=String(value||'').replace(/\D/g,''); if(!digits)return ''; return Number(digits).toLocaleString('id-ID'); }
     function getNominalInputValue() { const el=document.getElementById('amount'); if(!el)return 0; return Number(el.value.replace(/\D/g,''))||0; }
