@@ -370,7 +370,11 @@ function getCorsHeaders(request, env) {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Max-Age': '86400',
     'Content-Type': 'application/json',
-    'Vary': 'Origin'
+    'Vary': 'Origin',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://pembukuan-app.viqiquotex.workers.dev; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()'
   };
 
   if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
