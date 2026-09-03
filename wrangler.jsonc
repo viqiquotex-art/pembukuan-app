@@ -9,11 +9,5 @@
       "binding": "PEMBUKUAN_KV",
       "id": "d8a3b4065b4e483ebf8bf658d1d6cc95"
     }
-  ],
-
-  // ADMIN_EMAIL is intentionally NOT stored in GitHub.
-  // Configure it as a Cloudflare Worker Secret.
-  "secrets": {
-    "required": ["ADMIN_EMAIL"]
-  }
+  ]
 }
