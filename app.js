@@ -420,6 +420,11 @@ function renderRecap() {
   });
 }
 
+// Navigate from the main app to the dedicated Cloud login/register page.
+function goToCloudPage() {
+  window.location.href = './cloud.html';
+}
+
 function renderCloudPanel() {
   const credentials = typeof getCloudCredentials === 'function' ? getCloudCredentials() : null;
   const panel = document.getElementById('cloudPanel');
