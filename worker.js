@@ -23,6 +23,7 @@ export default {
   async fetch(request, env) {
     const corsHeaders = getCorsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
+    if (!isAllowedStateChangingOrigin(request, env)) return jsonResponse({ error: 'Forbidden origin' }, 403, corsHeaders);
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
@@ -45,6 +46,18 @@ export default {
     }
   }
 };
+
+function getAllowedOrigins(env) {
+  const configuredOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean) : [];
+  return configuredOrigins.length ? configuredOrigins : ['https://viqiquotex-art.github.io', 'https://vixora.my.id', 'https://www.vixora.my.id', 'http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
+}
+
+function isAllowedStateChangingOrigin(request, env) {
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return true;
+  const origin = request.headers.get('Origin');
+  if (!origin) return true;
+  return getAllowedOrigins(env).includes(origin);
+}
 
 async function handleRegister(request, env, corsHeaders) {
   try {
@@ -80,7 +93,7 @@ async function handleLogin(request, env, corsHeaders) {
     if (typeof email !== 'string' || email.length > 254 || !isValidEmail(email)) return jsonResponse({ error: 'Invalid email format' }, 400, corsHeaders);
     if (typeof password !== 'string' || password.length > 1000) return jsonResponse({ error: 'Invalid password' }, 400, corsHeaders);
     const kv = env.PEMBUKUAN_KV;
-    if (!kv) throw new Error('PEMBUCUAN_KV binding is not configured');
+    if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
     const normalizedEmail = email.trim().toLowerCase();
     const rate = await checkRateLimit(kv, `login:${normalizedEmail}`, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS);
     if (!rate.allowed) return rateLimitResponse(rate, corsHeaders);
@@ -203,9 +216,7 @@ function requireOwner(request, env) { return getTokenOwner(getAuthToken(request)
 function getTimestamp(transaction) { const value = transaction && (transaction.updatedAt || transaction.createdAt); const timestamp = value ? Date.parse(value) : 0; return Number.isFinite(timestamp) ? timestamp : 0; }
 function getCorsHeaders(request, env) {
   const requestOrigin = request.headers.get('Origin');
-  const configuredOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean) : [];
-  const defaultOrigins = ['https://viqiquotex-art.github.io', 'https://vixora.my.id', 'https://www.vixora.my.id', 'http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
-  const allowedOrigins = configuredOrigins.length ? configuredOrigins : defaultOrigins;
+  const allowedOrigins = getAllowedOrigins(env);
   const headers = { 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Max-Age': '86400', 'Content-Type': 'application/json', 'Vary': 'Origin', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Content-Security-Policy': "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://pembukuan-app.viqiquotex.workers.dev; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'", 'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()' };
   if (requestOrigin && allowedOrigins.includes(requestOrigin)) headers['Access-Control-Allow-Origin'] = requestOrigin;
   return headers;
@@ -213,17 +224,6 @@ function getCorsHeaders(request, env) {
 function withCookie(headers, cookie) { return cookie ? { ...headers, 'Set-Cookie': cookie } : headers; }
 function buildSessionCookie(token) { return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${SESSION_TTL_SECONDS}`; }
 function clearSessionCookie() { return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0`; }
-function getCookie(request, name) { const header = request.headers.get('Cookie') || ''; for (const part of header.split(';')) { const index = part.indexOf('='); if (index < 0) continue; const key = part.slice(0, index).trim(); if (key === name) return decodeURIComponent(part.slice(index + 1).trim()); } return null; }
-function jsonResponse(data, status = 200, headers = {}) { return new Response(JSON.stringify(data), { status, headers }); }
+function getCookie(request, name) { const header = request.headers.get('Cookie') || ''; for (const part of header.split(';')) { const index = part.indexOf('='); if (index === -1) continue; const key = part.slice(0, index).trim(); const value = part.slice(index + 1).trim(); if (key === name) return decodeURIComponent(value); } return null; }
 function generateId() { return crypto.randomUUID(); }
-function generateToken() { return crypto.randomUUID() + '-' + crypto.randomUUID(); }
-function encodeLegacyPassword(password) { return btoa(password + LEGACY_PASSWORD_SUFFIX); }
-async function hashPassword(password) { const saltBytes = crypto.getRandomValues(new Uint8Array(16)); const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256); return { hash: bytesToBase64(new Uint8Array(bits)), salt: bytesToBase64(saltBytes) }; }
-async function verifyPassword(password, storedHash, storedSalt) { try { const salt = base64ToBytes(storedSalt); const expected = base64ToBytes(storedHash); const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256); return constantTimeEqual(new Uint8Array(bits), expected); } catch { return false; } }
-function bytesToBase64(bytes) { let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary); }
-function base64ToBytes(value) { const binary = atob(value); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return bytes; }
-function constantTimeEqual(a, b) { if (a.length !== b.length) return false; let diff = 0; for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]; return diff === 0; }
-async function createSession(kv, token, userId) { const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(); await kv.put(`session:${token}`, JSON.stringify({ userId, expiresAt, createdAt: new Date().toISOString() }), { expirationTtl: SESSION_TTL_SECONDS }); }
-function isValidEmail(email) { return typeof email === 'string' && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
-function getAuthToken(request) { const cookieToken = getCookie(request, SESSION_COOKIE); if (cookieToken) return cookieToken; const header = request.headers.get('Authorization') || ''; if (header.toLowerCase().startsWith('bearer ')) return header.slice(7).trim() || null; return null; }
-async function getTokenOwner(token, kv) { if (!token || !kv) return null; const sessionData = await kv.get(`session:${token}`); if (sessionData) { try { const session = JSON.parse(sessionData); if (!session.userId || !session.expiresAt) return null; if (Date.now() >= Date.parse(session.expiresAt)) { await kv.delete(`session:${token}`); return null; } return session.userId; } catch { await kv.delete(`session:${token}`); return null; } } return await kv.get(`token:${token}`) || null; }
+function generateToken() { return crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, ''); }
