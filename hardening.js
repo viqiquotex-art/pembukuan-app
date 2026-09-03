@@ -1,23 +1,24 @@
 // ==========================================
 // NEXA - CLIENT DATA ISOLATION
 // ==========================================
-// Keeps the existing app/cloud code compatible while making the
-// local transaction store user-scoped. The app may continue to use
-// localStorage.getItem('transactions'), but the physical key is:
-//   transactions:user:<userId>  -> authenticated user
-//   transactions:offline        -> unauthenticated/offline bucket
+// User-scoped local transaction storage.
+// Authenticated: transactions:user:<userId>
+// Offline:       transactions:offline
 //
-// IMPORTANT: Only the exact legacy key "transactions" is remapped.
-// Credentials, sync snapshots, tombstones, and other localStorage
-// keys keep their existing behavior.
+// Only the legacy "transactions" key is remapped. Other localStorage
+// keys remain untouched.
 
 (function () {
   'use strict';
 
+  // Prevent duplicate interception if this script is accidentally loaded twice.
+  if (window.__NEXA_DATA_ISOLATION_INSTALLED__) return;
+  window.__NEXA_DATA_ISOLATION_INSTALLED__ = true;
+
   const LEGACY_KEY = 'transactions';
   const OFFLINE_KEY = 'transactions:offline';
   const USER_PREFIX = 'transactions:user:';
-  const MIGRATION_KEY = 'transactions_user_scope_migrated_v1';
+  const MIGRATION_VERSION = 'transactions_user_scope_migrated_v2';
 
   const nativeGetItem = Storage.prototype.getItem;
   const nativeSetItem = Storage.prototype.setItem;
@@ -44,8 +45,6 @@
     return userId ? USER_PREFIX + userId : OFFLINE_KEY;
   }
 
-  // Intercept only the transaction key so existing application code does not
-  // need to be rewritten throughout app.js, cloud.js, and sync.js.
   Storage.prototype.getItem = function (key) {
     if (isLocalStorage(this) && key === LEGACY_KEY) {
       return nativeGetItem.call(this, scopedTransactionKey());
@@ -67,13 +66,12 @@
     return nativeRemoveItem.call(this, key);
   };
 
-  // One-time migration of an old global transaction bucket.
-  // It is imported only for the currently authenticated user, and only when
-  // that user's scoped bucket does not already exist.
+  // Migrate a pre-isolation global transaction bucket once. Prefer an existing
+  // scoped bucket so an already-isolated user's data can never be overwritten.
   try {
     const storage = window.localStorage;
     const userId = currentUserId();
-    const migrated = nativeGetItem.call(storage, MIGRATION_KEY);
+    const migrated = nativeGetItem.call(storage, MIGRATION_VERSION);
 
     if (userId && !migrated) {
       const userKey = USER_PREFIX + userId;
@@ -84,15 +82,17 @@
         nativeSetItem.call(storage, userKey, legacyData);
       }
 
+      // Remove the legacy global bucket after migration. It must never remain
+      // available for accidental cross-user reads.
       nativeRemoveItem.call(storage, LEGACY_KEY);
-      nativeSetItem.call(storage, MIGRATION_KEY, '1');
+      nativeSetItem.call(storage, MIGRATION_VERSION, '1');
     }
   } catch (error) {
     console.warn('Transaction storage migration skipped:', error);
   }
 
   window.NEXA_DATA_ISOLATION = Object.freeze({
-    version: 1,
+    version: 2,
     getCurrentUserId: currentUserId,
     getTransactionStorageKey: scopedTransactionKey
   });
