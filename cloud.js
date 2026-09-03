@@ -74,6 +74,39 @@ function isCloudConnected() {
   return !!(credentials && credentials.userId && credentials.token);
 }
 
+// ==========================================
+// LOCAL DELETE TOMBSTONES
+// ==========================================
+
+function getLocalDeletedTransactionIds() {
+  try {
+    const raw = localStorage.getItem('deletedTransactionIds');
+    const ids = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(ids) ? ids.filter(Boolean) : []);
+  } catch (error) {
+    console.warn('Deleted transaction storage error:', error);
+    return new Set();
+  }
+}
+
+function saveLocalDeletedTransactionIds(ids) {
+  localStorage.setItem('deletedTransactionIds', JSON.stringify(Array.from(ids)));
+}
+
+function addLocalDeletedTransactionId(id) {
+  if (!id) return;
+  const ids = getLocalDeletedTransactionIds();
+  ids.add(id);
+  saveLocalDeletedTransactionIds(ids);
+}
+
+function removeLocalDeletedTransactionIds(idsToRemove) {
+  if (!Array.isArray(idsToRemove) || !idsToRemove.length) return;
+  const ids = getLocalDeletedTransactionIds();
+  idsToRemove.forEach(id => ids.delete(id));
+  saveLocalDeletedTransactionIds(ids);
+}
+
 function handleAuthFailure(message = 'Sesi cloud sudah berakhir. Silakan login kembali.') {
   clearCloudCredentials();
   showAlert(`🔐 ${message}`, 'error');
@@ -216,7 +249,6 @@ async function handleLogout() {
       });
     }
   } catch (error) {
-    // Logout locally even when the network is unavailable.
     console.warn('Server logout failed; clearing local session:', error);
   } finally {
     clearCloudCredentials();
@@ -239,9 +271,11 @@ async function syncToCloud() {
   try {
     setLoading(true, 'Syncing ke cloud...');
 
-    const transactions = JSON.parse(
+    const deletedIds = getLocalDeletedTransactionIds();
+    const allTransactions = JSON.parse(
       localStorage.getItem('transactions') || '[]'
     );
+    const transactions = allTransactions.filter(t => t?.id && !deletedIds.has(t.id));
 
     const response = await fetch(API_ENDPOINTS.saveTransactions, {
       method: 'POST',
@@ -265,6 +299,11 @@ async function syncToCloud() {
     if (!response.ok) {
       showAlert(`❌ ${data.error || 'Sync gagal'}`, 'error');
       return;
+    }
+
+    if (Array.isArray(data.deletedIds)) {
+      data.deletedIds.forEach(id => deletedIds.add(id));
+      saveLocalDeletedTransactionIds(deletedIds);
     }
 
     showAlert(`✅ Synced! ${data.count} transaksi tersimpan di cloud`, 'success');
@@ -318,11 +357,21 @@ async function loadFromCloud() {
       ? data.transactions
       : [];
 
+    const cloudDeletedIds = Array.isArray(data.deletedIds)
+      ? data.deletedIds.filter(Boolean)
+      : [];
+
+    const localDeletedIds = getLocalDeletedTransactionIds();
+    cloudDeletedIds.forEach(id => localDeletedIds.add(id));
+    saveLocalDeletedTransactionIds(localDeletedIds);
+
     const localTransactions = JSON.parse(
       localStorage.getItem('transactions') || '[]'
     );
 
-    const merged = mergeTransactions(localTransactions, cloudTransactions);
+    const cleanLocal = localTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
+    const cleanCloud = cloudTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
+    const merged = mergeTransactions(cleanLocal, cleanCloud, localDeletedIds);
 
     localStorage.setItem('transactions', JSON.stringify(merged));
 
@@ -367,7 +416,6 @@ async function loadStats() {
       return;
     }
 
-    // Supports both the new { stats: {...} } contract and old root fields.
     const stats = data.stats || data;
     if (!stats) return;
 
@@ -524,17 +572,18 @@ function formatRupiah(amount) {
   }).format(Number(amount) || 0);
 }
 
-function mergeTransactions(local, cloud) {
+function mergeTransactions(local, cloud, deletedIds = new Set()) {
   const merged = new Map();
 
   cloud.forEach(transaction => {
-    if (transaction?.id) merged.set(transaction.id, transaction);
+    if (transaction?.id && !deletedIds.has(transaction.id)) {
+      merged.set(transaction.id, transaction);
+    }
   });
 
   local.forEach(transaction => {
-    if (transaction?.id) {
+    if (transaction?.id && !deletedIds.has(transaction.id)) {
       const existing = merged.get(transaction.id);
-      // Prefer the newest record when updatedAt exists.
       if (!existing || new Date(transaction.updatedAt || 0) >= new Date(existing.updatedAt || 0)) {
         merged.set(transaction.id, transaction);
       }
