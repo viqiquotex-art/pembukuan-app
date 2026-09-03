@@ -1,0 +1,260 @@
+/* =========================================================
+   NEXA VISUAL POLISH — TikTok Review Edition
+   Visual-only layer. Does not change application logic.
+   ========================================================= */
+
+:root {
+  --nexa-primary: #5b5ce2;
+  --nexa-primary-2: #7b6ff6;
+  --nexa-ink: #171927;
+  --nexa-muted: #737789;
+  --nexa-line: rgba(92, 94, 126, .12);
+  --nexa-glass: rgba(255,255,255,.78);
+}
+
+body {
+  background:
+    radial-gradient(700px 420px at -5% -8%, rgba(123,111,246,.16), transparent 62%),
+    radial-gradient(600px 360px at 105% 4%, rgba(91,92,226,.12), transparent 62%),
+    linear-gradient(180deg, #f7f7fc 0%, #f3f4f9 100%);
+}
+
+.app-shell {
+  max-width: 1240px;
+  padding-top: 24px;
+}
+
+.header {
+  padding: 22px 24px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(255,255,255,.95);
+  background: rgba(255,255,255,.82);
+  box-shadow: 0 16px 42px rgba(37,39,75,.09);
+}
+
+.app-icon {
+  width: 52px;
+  height: 52px;
+  flex-basis: 52px;
+  border-radius: 17px;
+  font-size: 24px;
+  background: linear-gradient(145deg, #8586ff 0%, #5354db 52%, #4445c5 100%);
+  box-shadow: 0 12px 26px rgba(91,92,226,.30), inset 0 1px 1px rgba(255,255,255,.55);
+}
+
+.header-left h1 {
+  font-size: 27px;
+  letter-spacing: -1px;
+}
+
+.header-left p {
+  font-size: 12px;
+}
+
+.cloud-status {
+  min-height: 34px;
+  padding: 8px 13px;
+  background: rgba(247,248,252,.9);
+  box-shadow: 0 3px 10px rgba(31,34,55,.04);
+}
+
+.tabs {
+  position: sticky;
+  top: 10px;
+  z-index: 20;
+  padding: 6px;
+  margin-bottom: 24px;
+  background: rgba(229,230,240,.78);
+  border: 1px solid rgba(255,255,255,.85);
+  border-radius: 18px;
+  backdrop-filter: blur(18px);
+  box-shadow: 0 10px 28px rgba(40,42,75,.08);
+}
+
+.tab-btn {
+  min-height: 42px;
+  border-radius: 13px;
+  font-size: 13px;
+}
+
+.tab-btn.active {
+  background: linear-gradient(180deg, #ffffff 0%, #fafaff 100%);
+  color: var(--nexa-primary);
+  box-shadow: 0 6px 17px rgba(35,38,65,.11), inset 0 0 0 1px rgba(91,92,226,.06);
+}
+
+.page-heading,
+.form-section,
+.content-card,
+.cloud-info,
+.transaction-list {
+  border-color: rgba(225,226,235,.88);
+  box-shadow: 0 12px 32px rgba(37,39,75,.065);
+}
+
+.page-heading {
+  padding: 25px 26px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(123,111,246,.12), transparent 34%),
+    linear-gradient(135deg, #ffffff 0%, #fafaff 100%);
+}
+
+.page-heading h2,
+.section-heading h2 {
+  letter-spacing: -.7px;
+}
+
+.section-eyebrow {
+  padding: 5px 9px;
+  margin-bottom: 8px;
+  border-radius: 999px;
+  background: rgba(91,92,226,.08);
+  font-size: 9px;
+  letter-spacing: 1.25px;
+}
+
+.form-section {
+  position: relative;
+  overflow: hidden;
+  padding: 30px;
+}
+
+.form-section::before {
+  content: "";
+  position: absolute;
+  width: 220px;
+  height: 220px;
+  right: -110px;
+  top: -120px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(123,111,246,.11), transparent 68%);
+  pointer-events: none;
+}
+
+.form-group label {
+  color: #555969;
+}
+
+input, select, textarea {
+  min-height: 45px;
+  border-color: #e1e3ec;
+  border-radius: 12px;
+  background: #fafbfe;
+  box-shadow: inset 0 1px 1px rgba(30,32,50,.015);
+}
+
+textarea {
+  min-height: 112px;
+}
+
+input:focus, select:focus, textarea:focus {
+  box-shadow: 0 0 0 4px rgba(91,92,226,.09), 0 5px 14px rgba(38,40,76,.05);
+}
+
+.btn {
+  min-height: 42px;
+  border-radius: 12px;
+  letter-spacing: -.05px;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #7778f3 0%, #5556dc 100%);
+  box-shadow: 0 9px 22px rgba(91,92,226,.22);
+}
+
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 12px 27px rgba(91,92,226,.28);
+}
+
+.stats-grid {
+  gap: 18px;
+}
+
+.stat-card {
+  padding: 23px;
+  border-radius: 18px;
+  border-color: rgba(225,226,235,.92);
+  box-shadow: 0 9px 25px rgba(37,39,75,.06);
+}
+
+.stat-card h3 {
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+
+.stat-card .amount {
+  font-size: clamp(20px, 2.2vw, 26px);
+}
+
+.stat-card:hover,
+.month-card:hover,
+.content-card:hover {
+  transform: translateY(-2px);
+}
+
+.transaction-item {
+  padding: 18px 22px;
+}
+
+.transaction-item:hover {
+  background: linear-gradient(90deg, #fbfbff, #ffffff);
+}
+
+.transaction-category {
+  font-size: 13px;
+}
+
+.app-footer {
+  padding: 22px 0 0;
+  color: #9a9eac;
+  font-size: 10px;
+  text-align: center;
+}
+
+/* Edit banner / loading / cloud panels, even when older CSS is minimal. */
+.edit-mode-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid rgba(91,92,226,.12);
+  border-radius: 15px;
+  background: rgba(245,245,255,.88);
+}
+
+.edit-mode-banner strong { color: var(--nexa-primary); font-size: 12px; }
+.edit-mode-banner p { margin-top: 3px; color: var(--nexa-muted); font-size: 10px; }
+
+.loading {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f5f5ff;
+  color: var(--nexa-primary);
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .app-shell { padding: 14px 12px 42px; }
+  .header { padding: 17px; border-radius: 19px; }
+  .app-icon { width: 45px; height: 45px; flex-basis: 45px; border-radius: 14px; font-size: 21px; }
+  .header-left h1 { font-size: 22px; }
+  .header-left p { font-size: 10px; }
+  .cloud-status { padding: 7px 9px; font-size: 9px; }
+  .tabs { top: 6px; margin-bottom: 18px; }
+  .tab-btn { min-width: 92px; flex: 0 0 auto; padding: 10px 13px; }
+  .page-heading { padding: 20px; margin-bottom: 17px; }
+  .form-section, .content-card { padding: 19px; border-radius: 18px; }
+  .stats-grid { grid-template-columns: 1fr; gap: 10px; }
+  .stat-card { padding: 18px; }
+  .form-grid, .form-row { grid-template-columns: 1fr; gap: 0; margin-bottom: 0; }
+  .transaction-item { grid-template-columns: minmax(0,1fr) auto; gap: 10px; padding: 15px 16px; }
+  .transaction-amount { min-width: 0; font-size: 12px; }
+  .transaction-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
