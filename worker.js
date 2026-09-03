@@ -6,24 +6,20 @@
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 const PASSWORD_ITERATIONS = 100000;
 const LEGACY_PASSWORD_SUFFIX = ':pembukuan-salt-2026';
-
-// Authentication rate limiting.
-// KV-backed counters are intentionally short-lived so they clean themselves up.
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_WINDOW_SECONDS = 60 * 15;
 const REGISTER_MAX_ATTEMPTS = 5;
 const REGISTER_WINDOW_SECONDS = 60 * 60;
 const RATE_LIMIT_PREFIX = 'rate:';
+const SESSION_COOKIE = 'session';
 
 export default {
   async fetch(request, env) {
     const corsHeaders = getCorsHeaders(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
-
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
-
     try {
       if (path === '/api/health' && method === 'GET') return jsonResponse({ status: 'ok', message: 'Pembukuan API is running ⚡', timestamp: new Date().toISOString() }, 200, corsHeaders);
       if (path === '/api/auth/register' && method === 'POST') return await handleRegister(request, env, corsHeaders);
@@ -41,7 +37,7 @@ export default {
       console.error('API Error:', error);
       return jsonResponse({ error: 'Internal server error' }, 500, corsHeaders);
     }
-  },
+  }
 };
 
 async function handleRegister(request, env, corsHeaders) {
@@ -66,7 +62,7 @@ async function handleRegister(request, env, corsHeaders) {
     await kv.put(`user:${normalizedEmail}`, JSON.stringify(user));
     await kv.put(`user:${userId}`, JSON.stringify(user));
     await createSession(kv, token, userId);
-    return jsonResponse({ success: true, message: 'Registration successful', userId, name: user.name, email: user.email, token, expiresIn: SESSION_TTL_SECONDS }, 201, corsHeaders);
+    return jsonResponse({ success: true, message: 'Registration successful', userId, name: user.name, email: user.email, expiresIn: SESSION_TTL_SECONDS }, 201, withCookie(corsHeaders, buildSessionCookie(token)));
   } catch (error) { console.error('Register error:', error); return jsonResponse({ error: 'Registration failed' }, 500, corsHeaders); }
 }
 
@@ -97,7 +93,7 @@ async function handleLogin(request, env, corsHeaders) {
     await kv.put(`user:${normalizedEmail}`, JSON.stringify(user));
     await kv.put(`user:${user.userId}`, JSON.stringify(user));
     await createSession(kv, token, user.userId);
-    return jsonResponse({ success: true, message: 'Login successful', userId: user.userId, name: user.name, email: user.email, token, expiresIn: SESSION_TTL_SECONDS }, 200, corsHeaders);
+    return jsonResponse({ success: true, message: 'Login successful', userId: user.userId, name: user.name, email: user.email, expiresIn: SESSION_TTL_SECONDS }, 200, withCookie(corsHeaders, buildSessionCookie(token)));
   } catch (error) { console.error('Login error:', error); return jsonResponse({ error: 'Login failed' }, 500, corsHeaders); }
 }
 
@@ -111,11 +107,14 @@ async function checkRateLimit(kv, identifier, maxAttempts, windowSeconds) {
   return { allowed: true, retryAfter: remainingTtl, limit: maxAttempts, remaining: Math.max(0, maxAttempts - state.count) };
 }
 async function clearRateLimit(kv, identifier) { await kv.delete(`${RATE_LIMIT_PREFIX}${identifier}`); }
-function rateLimitResponse(rate, corsHeaders) { return jsonResponse({ error: 'Too many authentication attempts. Please try again later.', retryAfter: rate.retryAfter }, 429, { ...corsHeaders, 'Retry-After': String(rate.retryAfter) }); }
+function rateLimitResponse(rate, corsHeaders) { return jsonResponse({ error: 'Too many authentication attempts. Please try again later.', retryAfter: rate.retryAfter }, 429, withCookie(corsHeaders)); }
 
 async function handleLogout(request, env, corsHeaders) {
-  try { const token = getAuthToken(request); if (token && env.PEMBUKUAN_KV) { await env.PEMBUKUAN_KV.delete(`session:${token}`); await env.PEMBUKUAN_KV.delete(`token:${token}`); } return jsonResponse({ success: true, message: 'Logout successful' }, 200, corsHeaders); }
-  catch (error) { console.error('Logout error:', error); return jsonResponse({ error: 'Logout failed' }, 500, corsHeaders); }
+  try {
+    const token = getAuthToken(request);
+    if (token && env.PEMBUKUAN_KV) { await env.PEMBUKUAN_KV.delete(`session:${token}`); await env.PEMBUKUAN_KV.delete(`token:${token}`); }
+    return jsonResponse({ success: true, message: 'Logout successful' }, 200, withCookie(corsHeaders, clearSessionCookie()));
+  } catch (error) { console.error('Logout error:', error); return jsonResponse({ error: 'Logout failed' }, 500, corsHeaders); }
 }
 async function handleGetProfile(request, env, corsHeaders) {
   try { const userId = await requireOwner(request, env); if (!userId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); const data = await env.PEMBUKUAN_KV.get(`user:${userId}`); if (!data) return jsonResponse({ error: 'User not found' }, 404, corsHeaders); const user = JSON.parse(data); return jsonResponse({ success: true, userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin }, 200, corsHeaders); }
@@ -146,25 +145,19 @@ async function handleExport(userId, request, env, corsHeaders) {
   try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); const data = await env.PEMBUKUAN_KV.get(`transactions:${userId}`); const transactions = (data ? JSON.parse(data) : []).filter(t => t && !deletedIds.has(t.id)); return jsonResponse({ success: true, userId, transactions, count: transactions.length }, 200, corsHeaders); }
   catch (error) { console.error('Export error:', error); return jsonResponse({ error: 'Failed to export data' }, 500, corsHeaders); }
 }
-async function requireOwner(request, env) { return getTokenOwner(getAuthToken(request), env.PEMBUKUAN_KV); }
+
+function requireOwner(request, env) { return getTokenOwner(getAuthToken(request), env.PEMBUKUAN_KV); }
 function getTimestamp(transaction) { const value = transaction && (transaction.updatedAt || transaction.createdAt); const timestamp = value ? Date.parse(value) : 0; return Number.isFinite(timestamp) ? timestamp : 0; }
 
 function getCorsHeaders(request, env) {
   const requestOrigin = request.headers.get('Origin');
   const configuredOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean) : [];
-  const defaultOrigins = [
-    'https://viqiquotex-art.github.io',
-    'https://vixora.my.id',
-    'https://www.vixora.my.id',
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174'
-  ];
+  const defaultOrigins = ['https://viqiquotex-art.github.io', 'https://vixora.my.id', 'https://www.vixora.my.id', 'http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
   const allowedOrigins = configuredOrigins.length ? configuredOrigins : defaultOrigins;
   const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Max-Age': '86400',
     'Content-Type': 'application/json',
     'Vary': 'Origin',
@@ -175,6 +168,19 @@ function getCorsHeaders(request, env) {
   };
   if (requestOrigin && allowedOrigins.includes(requestOrigin)) headers['Access-Control-Allow-Origin'] = requestOrigin;
   return headers;
+}
+function withCookie(headers, cookie) { return cookie ? { ...headers, 'Set-Cookie': cookie } : headers; }
+function buildSessionCookie(token) { return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${SESSION_TTL_SECONDS}`; }
+function clearSessionCookie() { return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0`; }
+function getCookie(request, name) {
+  const header = request.headers.get('Cookie') || '';
+  for (const part of header.split(';')) {
+    const index = part.indexOf('=');
+    if (index < 0) continue;
+    const key = part.slice(0, index).trim();
+    if (key === name) return decodeURIComponent(part.slice(index + 1).trim());
+  }
+  return null;
 }
 function jsonResponse(data, status = 200, headers = {}) { return new Response(JSON.stringify(data), { status, headers }); }
 function generateId() { return crypto.randomUUID(); }
@@ -187,5 +193,16 @@ function base64ToBytes(value) { const binary = atob(value); const bytes = new Ui
 function constantTimeEqual(a, b) { if (a.length !== b.length) return false; let diff = 0; for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]; return diff === 0; }
 async function createSession(kv, token, userId) { const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(); await kv.put(`session:${token}`, JSON.stringify({ userId, expiresAt, createdAt: new Date().toISOString() }), { expirationTtl: SESSION_TTL_SECONDS }); }
 function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
-function getAuthToken(request) { const header = request.headers.get('Authorization') || ''; if (!header.toLowerCase().startsWith('bearer ')) return null; return header.slice(7).trim() || null; }
-async function getTokenOwner(token, kv) { if (!token || !kv) return null; const sessionData = await kv.get(`session:${token}`); if (sessionData) { try { const session = JSON.parse(sessionData); if (!session.userId || !session.expiresAt) return null; if (Date.now() >= Date.parse(session.expiresAt)) { await kv.delete(`session:${token}`); return null; } return session.userId; } catch { await kv.delete(`session:${token}`); return null; } } return await kv.get(`token:${token}`) || null; }
+function getAuthToken(request) {
+  const cookieToken = getCookie(request, SESSION_COOKIE);
+  if (cookieToken) return cookieToken;
+  const header = request.headers.get('Authorization') || '';
+  if (!header.toLowerCase().startsWith('bearer ')) return null;
+  return header.slice(7).trim() || null;
+}
+async function getTokenOwner(token, kv) {
+  if (!token || !kv) return null;
+  const sessionData = await kv.get(`session:${token}`);
+  if (sessionData) { try { const session = JSON.parse(sessionData); if (!session.userId || !session.expiresAt) return null; if (Date.now() >= Date.parse(session.expiresAt)) { await kv.delete(`session:${token}`); return null; } return session.userId; } catch { await kv.delete(`session:${token}`); return null; } }
+  return await kv.get(`token:${token}`) || null;
+}
