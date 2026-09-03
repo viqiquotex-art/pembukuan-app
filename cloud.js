@@ -9,9 +9,9 @@ const API_ENDPOINTS = {
   logout: `${API_BASE_URL}/api/auth/logout`,
   profile: `${API_BASE_URL}/api/auth/profile`,
   saveTransactions: `${API_BASE_URL}/api/transactions`,
-  getTransactions: userId => `${API_BASE_URL}/api/transactions/${userId}`,
-  getStats: userId => `${API_BASE_URL}/api/stats/${userId}`,
-  export: userId => `${API_BASE_URL}/api/export/${userId}`
+  getTransactions: userId => `${API_BASE_URL}/api/transactions/${encodeURIComponent(userId)}`,
+  getStats: userId => `${API_BASE_URL}/api/stats/${encodeURIComponent(userId)}`,
+  export: userId => `${API_BASE_URL}/api/export/${encodeURIComponent(userId)}`
 };
 
 function getCloudCredentials() {
@@ -42,6 +42,17 @@ function isCloudConnected() { return !!localStorage.getItem('cloud_userId'); }
 
 function authFetch(url, options = {}) {
   return fetch(url, { ...options, credentials: 'include' });
+}
+
+function parseLocalTransactions() {
+  try {
+    const raw = localStorage.getItem('transactions');
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.warn('Transaction storage error:', error);
+    return [];
+  }
 }
 
 function getLocalDeletedTransactionIds() {
@@ -115,7 +126,7 @@ async function syncToCloud() {
   try {
     setLoading(true, 'Syncing ke cloud...');
     const deletedIds = getLocalDeletedTransactionIds();
-    const allTransactions = JSON.parse(localStorage.getItem('transactions') || '[]');
+    const allTransactions = parseLocalTransactions();
     const transactions = allTransactions.filter(t => t?.id && !deletedIds.has(t.id));
     const response = await authFetch(API_ENDPOINTS.saveTransactions, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: credentials.userId, transactions }) });
     const data = await safeJson(response);
@@ -142,7 +153,7 @@ async function loadFromCloud() {
     const localDeletedIds = getLocalDeletedTransactionIds();
     cloudDeletedIds.forEach(id => localDeletedIds.add(id));
     saveLocalDeletedTransactionIds(localDeletedIds);
-    const localTransactions = JSON.parse(localStorage.getItem('transactions') || '[]');
+    const localTransactions = parseLocalTransactions();
     const cleanLocal = localTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
     const cleanCloud = cloudTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
     const merged = mergeTransactions(cleanLocal, cleanCloud, localDeletedIds);
@@ -166,7 +177,26 @@ async function loadStats() {
     if (userName) userName.textContent = credentials.name || '';
     const container = document.getElementById('statsContainer');
     if (!container) return;
-    container.innerHTML = `<div class="stat-card"><div class="label">💰 Total Pemasukan</div><div class="value">${formatRupiah(stats.totalIncome)}</div></div><div class="stat-card"><div class="label">💸 Total Pengeluaran</div><div class="value">${formatRupiah(stats.totalExpense)}</div></div><div class="stat-card"><div class="label">📊 Saldo</div><div class="value">${formatRupiah(stats.balance)}</div></div><div class="stat-card"><div class="label">📝 Transaksi</div><div class="value">${Number(stats.transactionCount) || 0}</div></div>`;
+    const values = [
+      ['💰 Total Pemasukan', formatRupiah(stats.totalIncome)],
+      ['💸 Total Pengeluaran', formatRupiah(stats.totalExpense)],
+      ['📊 Saldo', formatRupiah(stats.balance)],
+      ['📝 Transaksi', Number(stats.transactionCount) || 0]
+    ];
+    const fragment = document.createDocumentFragment();
+    values.forEach(([label, value]) => {
+      const card = document.createElement('div');
+      card.className = 'stat-card';
+      const labelEl = document.createElement('div');
+      labelEl.className = 'label';
+      labelEl.textContent = label;
+      const valueEl = document.createElement('div');
+      valueEl.className = 'value';
+      valueEl.textContent = value;
+      card.append(labelEl, valueEl);
+      fragment.appendChild(card);
+    });
+    container.replaceChildren(fragment);
   } catch (error) { console.error('Failed to load stats:', error); }
 }
 
