@@ -38,6 +38,7 @@ export default {
       if (path === '/api/auth/login' && method === 'POST') return await handleLogin(request, env, corsHeaders);
       if (path === '/api/auth/logout' && method === 'POST') return await handleLogout(request, env, corsHeaders);
       if (path === '/api/auth/profile' && method === 'GET') return await handleGetProfile(request, env, corsHeaders);
+      if (path === '/api/admin/config-status' && method === 'GET') return await handleAdminConfigStatus(request, env, corsHeaders);
       if (path === '/api/admin/users' && method === 'GET') return await handleGetUsers(request, env, corsHeaders);
       if (path === '/api/transactions' && method === 'POST') return await handleSaveTransactions(request, env, corsHeaders);
       if (path.match(/^\/api\/transactions\/[^/]+$/) && method === 'GET') return await handleGetTransactions(decodeURIComponent(path.split('/')[3]), request, env, corsHeaders);
@@ -141,6 +142,26 @@ async function handleLogout(request, env, corsHeaders) {
 async function handleGetProfile(request, env, corsHeaders) {
   try { const userId = await requireOwner(request, env); if (!userId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); const data = await env.PEMBUKUAN_KV.get(`user:${userId}`); if (!data) return jsonResponse({ error: 'User not found' }, 404, corsHeaders); const user = JSON.parse(data); return jsonResponse({ success: true, userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin }, 200, corsHeaders); }
   catch (error) { console.error('Profile error:', error); return jsonResponse({ error: 'Failed to get profile' }, 500, corsHeaders); }
+}
+
+async function handleAdminConfigStatus(request, env, corsHeaders) {
+  try {
+    const ownerId = await requireOwner(request, env);
+    if (!ownerId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
+
+    const adminEmail = typeof env.ADMIN_EMAIL === 'string' ? env.ADMIN_EMAIL.trim().toLowerCase() : '';
+    const kvConfigured = Boolean(env.PEMBUKUAN_KV);
+
+    return jsonResponse({
+      success: true,
+      adminConfigured: Boolean(adminEmail),
+      kvConfigured,
+      checkedAt: new Date().toISOString()
+    }, 200, corsHeaders);
+  } catch (error) {
+    console.error('Admin config status error:', error);
+    return jsonResponse({ error: 'Failed to check admin configuration' }, 500, corsHeaders);
+  }
 }
 
 async function handleGetUsers(request, env, corsHeaders) {
