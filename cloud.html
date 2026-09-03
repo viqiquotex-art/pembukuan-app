@@ -40,42 +40,82 @@
 <div class="container">
     <div class="header"><h1>☁️ Cloud Storage</h1><p>Backup data Pembukuan Anda ke cloud</p></div>
     <div class="content">
-        <div id="alert" class="alert"></div>
-        <form id="loginForm">
+        <div id="alert" class="alert" role="alert" aria-live="polite"></div>
+        <form id="loginForm" novalidate>
             <h2>🔐 Login</h2>
-            <div class="form-group"><label>Email</label><input type="email" id="loginEmail" placeholder="contoh@email.com" required></div>
-            <div class="form-group"><label>Password</label><input type="password" id="loginPassword" placeholder="Password" required></div>
+            <div class="form-group"><label for="loginEmail">Email</label><input type="email" id="loginEmail" placeholder="contoh@email.com" autocomplete="email" required></div>
+            <div class="form-group"><label for="loginPassword">Password</label><input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" required></div>
             <div id="loginLoading" class="loading"><span class="spinner"></span>Menghubungkan ke cloud...</div>
-            <div class="button-group"><button type="submit" class="btn-primary" id="loginBtn">Login</button><button type="button" class="btn-secondary" onclick="toggleForm()">Register</button></div>
+            <div class="button-group"><button type="submit" class="btn-primary" id="loginBtn">Login</button><button type="button" class="btn-secondary" id="showRegisterBtn">Register</button></div>
             <div class="info">💡 Login digunakan untuk menyimpan dan mengambil data pembukuan Anda dari cloud.</div>
         </form>
-        <form id="registerForm" style="display:none;">
+        <form id="registerForm" style="display:none" novalidate>
             <h2>📝 Register</h2>
-            <div class="form-group"><label>Nama Lengkap</label><input type="text" id="registerName" placeholder="Nama Anda" required></div>
-            <div class="form-group"><label>Email</label><input type="email" id="registerEmail" placeholder="contoh@email.com" required></div>
-            <div class="form-group"><label>Password</label><input type="password" id="registerPassword" placeholder="Minimal 8 karakter" minlength="8" required></div>
-            <div class="form-group"><label>Konfirmasi Password</label><input type="password" id="registerPasswordConfirm" placeholder="Ketik ulang password" required></div>
+            <div class="form-group"><label for="registerName">Nama Lengkap</label><input type="text" id="registerName" placeholder="Nama Anda" autocomplete="name" required></div>
+            <div class="form-group"><label for="registerEmail">Email</label><input type="email" id="registerEmail" placeholder="contoh@email.com" autocomplete="email" required></div>
+            <div class="form-group"><label for="registerPassword">Password</label><input type="password" id="registerPassword" placeholder="Minimal 8 karakter" autocomplete="new-password" minlength="8" required></div>
+            <div class="form-group"><label for="registerPasswordConfirm">Konfirmasi Password</label><input type="password" id="registerPasswordConfirm" placeholder="Ketik ulang password" autocomplete="new-password" required></div>
             <div id="registerLoading" class="loading"><span class="spinner"></span>Membuat akun...</div>
-            <div class="button-group"><button type="submit" class="btn-primary" id="registerBtn">Register</button><button type="button" class="btn-secondary" onclick="toggleForm()">Login</button></div>
+            <div class="button-group"><button type="submit" class="btn-primary" id="registerBtn">Register</button><button type="button" class="btn-secondary" id="showLoginBtn">Login</button></div>
             <div class="info">✨ Dengan akun cloud Anda dapat:<br>• Backup data<br>• Sinkronisasi antar perangkat<br>• Mengakses data kapan saja</div>
         </form>
         <div class="back-link"><a href="./index.html">← Kembali ke Aplikasi</a></div>
     </div>
 </div>
 <script>
+'use strict';
 const API_BASE_URL = 'https://pembukuan-app.viqiquotex.workers.dev';
-const API = { register: `${API_BASE_URL}/api/auth/register`, login: `${API_BASE_URL}/api/auth/login` };
-function showAlert(message, type = 'info') { const alert = document.getElementById('alert'); alert.className = `alert ${type} show`; alert.textContent = message; }
-function hideAlert() { document.getElementById('alert').classList.remove('show'); }
-function toggleForm() { const loginForm = document.getElementById('loginForm'); const registerForm = document.getElementById('registerForm'); hideAlert(); if (registerForm.style.display === 'none') { loginForm.style.display = 'none'; registerForm.style.display = 'block'; } else { loginForm.style.display = 'block'; registerForm.style.display = 'none'; } }
-function setLoading(type, loading) { if (type === 'login') { document.getElementById('loginBtn').disabled = loading; document.getElementById('loginLoading').style.display = loading ? 'block' : 'none'; } if (type === 'register') { document.getElementById('registerBtn').disabled = loading; document.getElementById('registerLoading').style.display = loading ? 'block' : 'none'; } }
-function saveIdentity(data) { localStorage.setItem('cloud_userId', data.userId); localStorage.setItem('cloud_email', data.email || ''); localStorage.setItem('cloud_name', data.name || ''); }
-function clearLegacyTokenStorage() { localStorage.removeItem('cloud_credentials'); localStorage.removeItem('cloud_token'); }
-async function checkExistingSession() { try { const response = await fetch(`${API_BASE_URL}/api/auth/profile`, { method: 'GET', credentials: 'include' }); if (response.ok) { const data = await response.json(); saveIdentity(data); showAlert('✅ Anda sudah login. Mengarahkan ke aplikasi...', 'info'); setTimeout(() => { window.location.href = './index.html'; }, 1000); } else clearLegacyTokenStorage(); } catch (error) { console.warn('Session check failed:', error); } }
-document.getElementById('loginForm').addEventListener('submit', async function(event) { event.preventDefault(); hideAlert(); const email = document.getElementById('loginEmail').value.trim().toLowerCase(); const password = document.getElementById('loginPassword').value; if (!email || !password) { showAlert('❌ Email dan password harus diisi.', 'error'); return; } setLoading('login', true); try { const response = await fetch(API.login, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }); const data = await response.json(); if (!response.ok) { showAlert(`❌ ${data.error || 'Login gagal'}`, 'error'); return; } saveIdentity(data); clearLegacyTokenStorage(); showAlert(`✅ Login berhasil! Selamat datang, ${data.name}!`, 'success'); setTimeout(() => { window.location.href = './index.html'; }, 1000); } catch (error) { console.error('LOGIN ERROR:', error); showAlert(`❌ Tidak dapat terhubung ke server: ${error.message}`, 'error'); } finally { setLoading('login', false); } });
-document.getElementById('registerForm').addEventListener('submit', async function(event) { event.preventDefault(); hideAlert(); const name = document.getElementById('registerName').value.trim(); const email = document.getElementById('registerEmail').value.trim().toLowerCase(); const password = document.getElementById('registerPassword').value; const confirmPassword = document.getElementById('registerPasswordConfirm').value; if (!name || !email || !password || !confirmPassword) { showAlert('❌ Semua field harus diisi.', 'error'); return; } if (password.length < 8) { showAlert('❌ Password minimal 8 karakter.', 'error'); return; } if (password !== confirmPassword) { showAlert('❌ Password tidak cocok.', 'error'); return; } setLoading('register', true); try { const response = await fetch(API.register, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) }); const data = await response.json(); if (!response.ok) { showAlert(`❌ ${data.error || 'Register gagal'}`, 'error'); return; } saveIdentity(data); clearLegacyTokenStorage(); showAlert(`✅ Register berhasil! Selamat datang, ${data.name}!`, 'success'); setTimeout(() => { window.location.href = './index.html'; }, 1000); } catch (error) { console.error('REGISTER ERROR:', error); showAlert(`❌ Tidak dapat terhubung ke server: ${error.message}`, 'error'); } finally { setLoading('register', false); } });
-localStorage.removeItem('apiBaseUrl');
-window.addEventListener('DOMContentLoaded', checkExistingSession);
+const API = { register: `${API_BASE_URL}/api/auth/register`, login: `${API_BASE_URL}/api/auth/login`, profile: `${API_BASE_URL}/api/auth/profile` };
+const $ = id => document.getElementById(id);
+function showAlert(message, type = 'info') { const alert = $('alert'); if (!alert) return; alert.className = `alert ${type} show`; alert.textContent = message; }
+function hideAlert() { const alert = $('alert'); if (alert) alert.className = 'alert'; }
+function setLoading(type, loading) { const button = $(type === 'login' ? 'loginBtn' : 'registerBtn'); const loadingEl = $(type === 'login' ? 'loginLoading' : 'registerLoading'); if (button) button.disabled = loading; if (loadingEl) loadingEl.style.display = loading ? 'block' : 'none'; }
+function saveIdentity(data) { if (!data || !data.userId) throw new Error('Server tidak mengembalikan identitas pengguna'); localStorage.setItem('cloud_userId', data.userId); localStorage.setItem('cloud_email', data.email || ''); localStorage.setItem('cloud_name', data.name || ''); localStorage.removeItem('cloud_credentials'); localStorage.removeItem('cloud_token'); }
+function toggleForm(showRegister) { $('loginForm').style.display = showRegister ? 'none' : 'block'; $('registerForm').style.display = showRegister ? 'block' : 'none'; hideAlert(); }
+async function readResponse(response) { try { return await response.json(); } catch { return {}; } }
+async function submitAuth(type) {
+    hideAlert();
+    const isLogin = type === 'login';
+    const email = $(isLogin ? 'loginEmail' : 'registerEmail').value.trim().toLowerCase();
+    const password = $(isLogin ? 'loginPassword' : 'registerPassword').value;
+    if (!email || !password) return showAlert(isLogin ? '❌ Email dan password harus diisi.' : '❌ Semua field harus diisi.', 'error');
+    if (!isLogin) {
+        const name = $('registerName').value.trim();
+        const confirmPassword = $('registerPasswordConfirm').value;
+        if (!name) return showAlert('❌ Nama lengkap harus diisi.', 'error');
+        if (password.length < 8) return showAlert('❌ Password minimal 8 karakter.', 'error');
+        if (password !== confirmPassword) return showAlert('❌ Password tidak cocok.', 'error');
+    }
+    setLoading(type, true);
+    try {
+        const body = isLogin ? { email, password } : { name: $('registerName').value.trim(), email, password };
+        const response = await fetch(isLogin ? API.login : API.register, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify(body) });
+        const data = await readResponse(response);
+        if (!response.ok) { showAlert(`❌ ${data.error || `Request gagal (${response.status})`}`, 'error'); return; }
+        saveIdentity(data);
+        showAlert(`✅ ${isLogin ? 'Login' : 'Register'} berhasil! Mengarahkan ke aplikasi...`, 'success');
+        setTimeout(() => { window.location.href = './index.html'; }, 800);
+    } catch (error) {
+        console.error(`${type.toUpperCase()} ERROR:`, error);
+        showAlert(`❌ Tidak dapat terhubung ke server: ${error.message}`, 'error');
+    } finally { setLoading(type, false); }
+}
+async function checkExistingSession() {
+    try {
+        const response = await fetch(API.profile, { method: 'GET', credentials: 'include', headers: { 'Accept': 'application/json' } });
+        if (!response.ok) return;
+        const data = await readResponse(response);
+        if (data.userId) { saveIdentity(data); showAlert('✅ Anda sudah login. Mengarahkan ke aplikasi...', 'info'); setTimeout(() => { window.location.href = './index.html'; }, 800); }
+    } catch (error) { console.warn('Session check failed:', error); }
+}
+function initAuthPage() {
+    $('loginForm').addEventListener('submit', event => { event.preventDefault(); submitAuth('login'); });
+    $('registerForm').addEventListener('submit', event => { event.preventDefault(); submitAuth('register'); });
+    $('showRegisterBtn').addEventListener('click', () => toggleForm(true));
+    $('showLoginBtn').addEventListener('click', () => toggleForm(false));
+    checkExistingSession();
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initAuthPage); else initAuthPage();
 </script>
 </body>
 </html>
