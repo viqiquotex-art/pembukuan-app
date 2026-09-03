@@ -1,7 +1,6 @@
 // ==========================================
 // PEMBUKUAN API - Cloudflare Worker
-// Authentication, Authorization & Transactions
-// Per-transaction KV storage with legacy migration
+// Authentication, Authorization, Transactions & Admin Audit
 // ==========================================
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
@@ -22,6 +21,9 @@ const MAX_USER_ID_LENGTH = 100;
 const TX_PREFIX = 'tx:';
 const DELETED_PREFIX = 'deleted:';
 const LEGACY_TRANSACTIONS_PREFIX = 'transactions:';
+const AUDIT_PREFIX = 'audit:';
+const AUDIT_RETENTION_SECONDS = 60 * 60 * 24 * 180;
+const MAX_AUDIT_PAGE_SIZE = 100;
 const MAX_CLIENT_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 export default {
@@ -40,6 +42,8 @@ export default {
       if (path === '/api/auth/profile' && method === 'GET') return await handleGetProfile(request, env, corsHeaders);
       if (path === '/api/admin/config-status' && method === 'GET') return await handleAdminConfigStatus(request, env, corsHeaders);
       if (path === '/api/admin/users' && method === 'GET') return await handleGetUsers(request, env, corsHeaders);
+      if (path === '/api/admin/overview' && method === 'GET') return await handleAdminOverview(request, env, corsHeaders);
+      if (path === '/api/admin/audit' && method === 'GET') return await handleAdminAudit(request, env, corsHeaders);
       if (path === '/api/transactions' && method === 'POST') return await handleSaveTransactions(request, env, corsHeaders);
       if (path.match(/^\/api\/transactions\/[^/]+$/) && method === 'GET') return await handleGetTransactions(decodeURIComponent(path.split('/')[3]), request, env, corsHeaders);
       if (path.match(/^\/api\/transactions\/[^/]+\/[^/]+$/) && method === 'DELETE') { const parts = path.split('/'); return await handleDeleteTransaction(decodeURIComponent(parts[3]), decodeURIComponent(parts[4]), request, env, corsHeaders); }
@@ -86,6 +90,7 @@ async function handleRegister(request, env, corsHeaders) {
     await kv.put(`user:${normalizedEmail}`, JSON.stringify(user));
     await kv.put(`user:${userId}`, JSON.stringify(user));
     await createSession(kv, token, userId);
+    await recordAudit(env, { action: 'REGISTER', status: 'SUCCESS', userId, email: normalizedEmail, metadata: { source: 'auth' } });
     return jsonResponse({ success: true, message: 'Registration successful', userId, name: user.name, email: user.email, token, expiresIn: SESSION_TTL_SECONDS }, 201, withCookie(corsHeaders, buildSessionCookie(token)));
   } catch (error) { console.error('Register error:', error); return jsonResponse({ error: 'Registration failed' }, 500, corsHeaders); }
 }
@@ -101,24 +106,22 @@ async function handleLogin(request, env, corsHeaders) {
     if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
     const normalizedEmail = email.trim().toLowerCase();
     const rate = await checkRateLimit(kv, `login:${normalizedEmail}`, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS);
-    if (!rate.allowed) return rateLimitResponse(rate, corsHeaders);
+    if (!rate.allowed) { await recordAudit(env, { action: 'LOGIN_FAILED', status: 'RATE_LIMITED', email: normalizedEmail, metadata: { reason: 'rate_limit' } }); return rateLimitResponse(rate, corsHeaders); }
     const raw = await kv.get(`user:${normalizedEmail}`);
-    if (!raw) return jsonResponse({ error: 'Invalid email or password' }, 401, corsHeaders);
+    if (!raw) { await recordAudit(env, { action: 'LOGIN_FAILED', status: 'FAILURE', email: normalizedEmail, metadata: { reason: 'unknown_account' } }); return jsonResponse({ error: 'Invalid email or password' }, 401, corsHeaders); }
     const user = JSON.parse(raw);
     let valid = false;
     if (user.passwordHash && user.passwordSalt) valid = await verifyPassword(password, user.passwordHash, user.passwordSalt);
     else if (user.password) valid = user.password === encodeLegacyPassword(password);
-    if (!valid) return jsonResponse({ error: 'Invalid email or password' }, 401, corsHeaders);
+    if (!valid) { await recordAudit(env, { action: 'LOGIN_FAILED', status: 'FAILURE', userId: user.userId, email: normalizedEmail, metadata: { reason: 'invalid_credentials' } }); return jsonResponse({ error: 'Invalid email or password' }, 401, corsHeaders); }
     await clearRateLimit(kv, `login:${normalizedEmail}`);
-    if (user.password) {
-      const passwordData = await hashPassword(password);
-      user.passwordHash = passwordData.hash; user.passwordSalt = passwordData.salt; user.passwordVersion = 1; delete user.password;
-    }
+    if (user.password) { const passwordData = await hashPassword(password); user.passwordHash = passwordData.hash; user.passwordSalt = passwordData.salt; user.passwordVersion = 1; delete user.password; }
     user.lastLogin = new Date().toISOString();
     const token = generateToken();
     await kv.put(`user:${normalizedEmail}`, JSON.stringify(user));
     await kv.put(`user:${user.userId}`, JSON.stringify(user));
     await createSession(kv, token, user.userId);
+    await recordAudit(env, { action: 'LOGIN_SUCCESS', status: 'SUCCESS', userId: user.userId, email: normalizedEmail, metadata: { source: 'auth' } });
     return jsonResponse({ success: true, message: 'Login successful', userId: user.userId, name: user.name, email: user.email, token, expiresIn: SESSION_TTL_SECONDS }, 200, withCookie(corsHeaders, buildSessionCookie(token)));
   } catch (error) { console.error('Login error:', error); return jsonResponse({ error: 'Login failed' }, 500, corsHeaders); }
 }
@@ -136,81 +139,190 @@ async function clearRateLimit(kv, identifier) { await kv.delete(`${RATE_LIMIT_PR
 function rateLimitResponse(rate, corsHeaders) { return jsonResponse({ error: 'Too many authentication attempts. Please try again later.', retryAfter: rate.retryAfter }, 429, { ...corsHeaders, 'Retry-After': String(rate.retryAfter) }); }
 
 async function handleLogout(request, env, corsHeaders) {
-  try { const token = getAuthToken(request); if (token && env.PEMBUKUAN_KV) await env.PEMBUKUAN_KV.delete(`session:${token}`); return jsonResponse({ success: true, message: 'Logout successful' }, 200, withCookie(corsHeaders, clearSessionCookie())); }
-  catch (error) { console.error('Logout error:', error); return jsonResponse({ error: 'Logout failed' }, 500, corsHeaders); }
+  try {
+    const token = getAuthToken(request);
+    const userId = token ? await getTokenOwner(token, env.PEMBUKUAN_KV) : null;
+    let email = '';
+    if (userId && env.PEMBUKUAN_KV) { const raw = await env.PEMBUKUAN_KV.get(`user:${userId}`); if (raw) { try { email = JSON.parse(raw).email || ''; } catch {} } }
+    if (token && env.PEMBUKUAN_KV) await env.PEMBUKUAN_KV.delete(`session:${token}`);
+    if (userId) await recordAudit(env, { action: 'LOGOUT', status: 'SUCCESS', userId, email, metadata: { source: 'auth' } });
+    return jsonResponse({ success: true, message: 'Logout successful' }, 200, withCookie(corsHeaders, clearSessionCookie()));
+  } catch (error) { console.error('Logout error:', error); return jsonResponse({ error: 'Logout failed' }, 500, corsHeaders); }
 }
 async function handleGetProfile(request, env, corsHeaders) {
   try { const userId = await requireOwner(request, env); if (!userId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); const data = await env.PEMBUKUAN_KV.get(`user:${userId}`); if (!data) return jsonResponse({ error: 'User not found' }, 404, corsHeaders); const user = JSON.parse(data); return jsonResponse({ success: true, userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin }, 200, corsHeaders); }
   catch (error) { console.error('Profile error:', error); return jsonResponse({ error: 'Failed to get profile' }, 500, corsHeaders); }
 }
 
+async function requireAdmin(request, env) {
+  const ownerId = await requireOwner(request, env);
+  if (!ownerId) return { ok: false, status: 401, error: 'Invalid or expired token' };
+  const adminEmail = typeof env.ADMIN_EMAIL === 'string' ? env.ADMIN_EMAIL.trim().toLowerCase() : '';
+  if (!adminEmail) return { ok: false, status: 503, error: 'Admin configuration is missing' };
+  const ownerData = await env.PEMBUKUAN_KV.get(`user:${ownerId}`);
+  if (!ownerData) return { ok: false, status: 404, error: 'Admin user not found' };
+  let owner;
+  try { owner = JSON.parse(ownerData); } catch { return { ok: false, status: 404, error: 'Admin user data is invalid' }; }
+  const ownerEmail = typeof owner.email === 'string' ? owner.email.trim().toLowerCase() : '';
+  if (ownerEmail !== adminEmail) return { ok: false, status: 403, error: 'Forbidden: admin access required' };
+  return { ok: true, userId: ownerId, email: ownerEmail };
+}
+
 async function handleAdminConfigStatus(request, env, corsHeaders) {
   try {
-    const ownerId = await requireOwner(request, env);
-    if (!ownerId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
+    const admin = await requireAdmin(request, env);
+    if (!admin.ok) return jsonResponse({ error: admin.error }, admin.status, corsHeaders);
+    await recordAudit(env, { action: 'ADMIN_CONFIG_CHECK', status: 'SUCCESS', userId: admin.userId, email: admin.email, metadata: { endpoint: '/api/admin/config-status' } });
+    return jsonResponse({ success: true, adminConfigured: Boolean(env.ADMIN_EMAIL), kvConfigured: Boolean(env.PEMBUKUAN_KV), checkedAt: new Date().toISOString() }, 200, corsHeaders);
+  } catch (error) { console.error('Admin config status error:', error); return jsonResponse({ error: 'Failed to check admin configuration' }, 500, corsHeaders); }
+}
 
-    const adminEmail = typeof env.ADMIN_EMAIL === 'string' ? env.ADMIN_EMAIL.trim().toLowerCase() : '';
-    const kvConfigured = Boolean(env.PEMBUKUAN_KV);
-
-    return jsonResponse({
-      success: true,
-      adminConfigured: Boolean(adminEmail),
-      kvConfigured,
-      checkedAt: new Date().toISOString()
-    }, 200, corsHeaders);
-  } catch (error) {
-    console.error('Admin config status error:', error);
-    return jsonResponse({ error: 'Failed to check admin configuration' }, 500, corsHeaders);
-  }
+async function listUsers(env) {
+  const users = [];
+  let cursor;
+  do {
+    const page = await env.PEMBUKUAN_KV.list({ prefix: 'user:', cursor });
+    for (const key of page.keys) {
+      const value = await env.PEMBUKUAN_KV.get(key.name);
+      if (!value) continue;
+      try {
+        const user = JSON.parse(value);
+        if (key.name !== `user:${user.userId}`) continue;
+        users.push({ userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin });
+      } catch {}
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return users;
 }
 
 async function handleGetUsers(request, env, corsHeaders) {
   try {
-    const ownerId = await requireOwner(request, env);
-    if (!ownerId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
+    const admin = await requireAdmin(request, env);
+    if (!admin.ok) return jsonResponse({ error: admin.error }, admin.status, corsHeaders);
+    const users = await listUsers(env);
+    const usersWithRole = users.map(user => ({ ...user, isAdmin: String(user.email || '').trim().toLowerCase() === env.ADMIN_EMAIL.trim().toLowerCase() }));
+    usersWithRole.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    await recordAudit(env, { action: 'ADMIN_USERS_VIEW', status: 'SUCCESS', userId: admin.userId, email: admin.email, metadata: { count: usersWithRole.length } });
+    return jsonResponse({ success: true, count: usersWithRole.length, users: usersWithRole }, 200, corsHeaders);
+  } catch (error) { console.error('Admin users error:', error); return jsonResponse({ error: 'Failed to get users' }, 500, corsHeaders); }
+}
 
-    const adminEmail = typeof env.ADMIN_EMAIL === 'string' ? env.ADMIN_EMAIL.trim().toLowerCase() : '';
-    if (!adminEmail) return jsonResponse({ error: 'Admin configuration is missing' }, 503, corsHeaders);
+function parsePositiveInt(value, fallback, max) { const n = Number.parseInt(value, 10); return Number.isFinite(n) && n > 0 ? Math.min(n, max) : fallback; }
+function startOfUtcDay(date) { const d = new Date(date); d.setUTCHours(0, 0, 0, 0); return d; }
+function dayKey(date) { return new Date(date).toISOString().slice(0, 10); }
+function buildDailyBuckets(days) { const buckets = []; const now = startOfUtcDay(new Date()); for (let i = days - 1; i >= 0; i--) { const d = new Date(now); d.setUTCDate(d.getUTCDate() - i); buckets.push({ date: dayKey(d), registrations: 0, logins: 0, failedLogins: 0 }); } return buckets; }
 
-    const ownerData = await env.PEMBUKUAN_KV.get(`user:${ownerId}`);
-    if (!ownerData) return jsonResponse({ error: 'Admin user not found' }, 404, corsHeaders);
+async function getAuditEvents(env, options = {}) {
+  const limit = options.limit || 1000;
+  const events = [];
+  let cursor;
+  do {
+    const page = await env.PEMBUKUAN_KV.list({ prefix: AUDIT_PREFIX, limit: 1000, cursor });
+    for (const key of page.keys) {
+      const raw = await env.PEMBUKUAN_KV.get(key.name);
+      if (!raw) continue;
+      try { events.push(JSON.parse(raw)); } catch {}
+      if (events.length >= limit) break;
+    }
+    if (events.length >= limit) break;
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  events.sort((a, b) => Date.parse(b.timestamp || 0) - Date.parse(a.timestamp || 0));
+  return events;
+}
 
-    const owner = JSON.parse(ownerData);
-    const ownerEmail = typeof owner.email === 'string' ? owner.email.trim().toLowerCase() : '';
-    const isAdmin = ownerEmail === adminEmail;
-    if (!isAdmin) return jsonResponse({ error: 'Forbidden: admin access required' }, 403, corsHeaders);
+async function handleAdminOverview(request, env, corsHeaders) {
+  try {
+    const admin = await requireAdmin(request, env);
+    if (!admin.ok) return jsonResponse({ error: admin.error }, admin.status, corsHeaders);
+    const url = new URL(request.url);
+    const days = parsePositiveInt(url.searchParams.get('days'), 30, 90);
+    const users = await listUsers(env);
+    const today = startOfUtcDay(new Date());
+    const activeCutoff = Date.now() - 30 * 86400000;
+    const new7Cutoff = Date.now() - 7 * 86400000;
+    const totalUsers = users.length;
+    const activeUsers30d = users.filter(u => Date.parse(u.lastLogin || '') >= activeCutoff).length;
+    const newUsers7d = users.filter(u => Date.parse(u.createdAt || '') >= new7Cutoff).length;
+    const registrationsToday = users.filter(u => Date.parse(u.createdAt || '') >= today.getTime()).length;
+    const events = await getAuditEvents(env, 5000);
+    const buckets = buildDailyBuckets(days);
+    const map = new Map(buckets.map(bucket => [bucket.date, bucket]));
+    for (const user of users) { const date = dayKey(user.createdAt); if (map.has(date)) map.get(date).registrations += 1; }
+    for (const event of events) {
+      const date = dayKey(event.timestamp); const bucket = map.get(date); if (!bucket) continue;
+      if (event.action === 'LOGIN_SUCCESS') bucket.logins += 1;
+      if (event.action === 'LOGIN_FAILED') bucket.failedLogins += 1;
+    }
+    const loginSuccess = events.filter(e => e.action === 'LOGIN_SUCCESS');
+    const failedLogin = events.filter(e => e.action === 'LOGIN_FAILED');
+    const login24h = loginSuccess.filter(e => Date.parse(e.timestamp) >= Date.now() - 86400000).length;
+    const failed24h = failedLogin.filter(e => Date.parse(e.timestamp) >= Date.now() - 86400000).length;
+    const role = { admin: users.filter(u => String(u.email || '').trim().toLowerCase() === env.ADMIN_EMAIL.trim().toLowerCase()).length, user: 0 };
+    role.user = Math.max(0, totalUsers - role.admin);
+    await recordAudit(env, { action: 'ADMIN_OVERVIEW_VIEW', status: 'SUCCESS', userId: admin.userId, email: admin.email, metadata: { days } });
+    return jsonResponse({ success: true, generatedAt: new Date().toISOString(), rangeDays: days, summary: { totalUsers, activeUsers30d, newUsers7d, registrationsToday, login24h, failedLogin24h: failed24h, roles: role }, series: buckets, audit: { totalLoginSuccess: loginSuccess.length, totalLoginFailed: failedLogin.length } }, 200, corsHeaders);
+  } catch (error) { console.error('Admin overview error:', error); return jsonResponse({ error: 'Failed to build admin overview' }, 500, corsHeaders); }
+}
 
-    const users = [];
-    let cursor;
-    do {
-      const page = await env.PEMBUKUAN_KV.list({ prefix: 'user:', cursor });
-      for (const key of page.keys) {
-        const value = await env.PEMBUKUAN_KV.get(key.name);
-        if (!value) continue;
-        try {
-          const user = JSON.parse(value);
-          if (key.name === `user:${user.userId}`) {
-            const userEmail = typeof user.email === 'string' ? user.email.trim().toLowerCase() : '';
-            users.push({
-              userId: user.userId,
-              name: user.name,
-              email: user.email,
-              createdAt: user.createdAt,
-              lastLogin: user.lastLogin,
-              isAdmin: userEmail === adminEmail
-            });
-          }
-        } catch {}
-      }
-      cursor = page.list_complete ? undefined : page.cursor;
-    } while (cursor);
+async function handleAdminAudit(request, env, corsHeaders) {
+  try {
+    const admin = await requireAdmin(request, env);
+    if (!admin.ok) return jsonResponse({ error: admin.error }, admin.status, corsHeaders);
+    const url = new URL(request.url);
+    const page = parsePositiveInt(url.searchParams.get('page'), 1, 1000000);
+    const pageSize = parsePositiveInt(url.searchParams.get('pageSize'), 25, MAX_AUDIT_PAGE_SIZE);
+    const action = String(url.searchParams.get('action') || 'all').trim().toUpperCase();
+    const status = String(url.searchParams.get('status') || 'all').trim().toUpperCase();
+    const q = String(url.searchParams.get('q') || '').trim().toLowerCase().slice(0, 100);
+    const from = Date.parse(url.searchParams.get('from') || '') || 0;
+    const toRaw = Date.parse(url.searchParams.get('to') || '');
+    const to = toRaw ? toRaw + 86400000 - 1 : Number.POSITIVE_INFINITY;
+    let events = await getAuditEvents(env, 5000);
+    if (action !== 'ALL') events = events.filter(e => e.action === action);
+    if (status !== 'ALL') events = events.filter(e => e.status === status);
+    if (q) events = events.filter(e => `${e.email || ''} ${e.userId || ''} ${e.action || ''} ${e.metadata?.reason || ''}`.toLowerCase().includes(q));
+    events = events.filter(e => { const t = Date.parse(e.timestamp || ''); return Number.isFinite(t) && t >= from && t <= to; });
+    const total = events.length;
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(page, pages);
+    const start = (safePage - 1) * pageSize;
+    const items = events.slice(start, start + pageSize).map(e => ({ id: e.id, timestamp: e.timestamp, action: e.action, status: e.status, userId: e.userId || null, email: e.email || null, metadata: e.metadata || {} }));
+    await recordAudit(env, { action: 'ADMIN_AUDIT_VIEW', status: 'SUCCESS', userId: admin.userId, email: admin.email, metadata: { page: safePage, pageSize, action, status } });
+    return jsonResponse({ success: true, page: safePage, pageSize, total, totalPages: pages, events: items }, 200, corsHeaders);
+  } catch (error) { console.error('Admin audit error:', error); return jsonResponse({ error: 'Failed to get audit log' }, 500, corsHeaders); }
+}
 
-    users.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    return jsonResponse({ success: true, count: users.length, users }, 200, corsHeaders);
-  } catch (error) {
-    console.error('Admin users error:', error);
-    return jsonResponse({ error: 'Failed to get users' }, 500, corsHeaders);
+async function recordAudit(env, event) {
+  try {
+    const kv = env.PEMBUKUAN_KV;
+    if (!kv) return false;
+    const timestamp = new Date().toISOString();
+    const id = generateId();
+    const safe = {
+      id,
+      timestamp,
+      action: String(event.action || 'UNKNOWN').slice(0, 60),
+      status: String(event.status || 'SUCCESS').slice(0, 40),
+      userId: typeof event.userId === 'string' ? event.userId.slice(0, MAX_USER_ID_LENGTH) : undefined,
+      email: typeof event.email === 'string' ? event.email.trim().toLowerCase().slice(0, 254) : undefined,
+      metadata: sanitizeAuditMetadata(event.metadata)
+    };
+    Object.keys(safe).forEach(key => safe[key] === undefined && delete safe[key]);
+    const reverseTime = String(9999999999999 - Date.now()).padStart(13, '0');
+    await kv.put(`${AUDIT_PREFIX}${reverseTime}:${id}`, JSON.stringify(safe), { expirationTtl: AUDIT_RETENTION_SECONDS });
+    return true;
+  } catch (error) { console.error('Audit write error:', error); return false; }
+}
+function sanitizeAuditMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+  const safe = {};
+  for (const [key, value] of Object.entries(metadata).slice(0, 10)) {
+    if (typeof value === 'string') safe[String(key).slice(0, 40)] = value.slice(0, 200);
+    else if (typeof value === 'number' || typeof value === 'boolean') safe[String(key).slice(0, 40)] = value;
   }
+  return safe;
 }
 
 async function handleSaveTransactions(request, env, corsHeaders) {
@@ -223,6 +335,7 @@ async function handleSaveTransactions(request, env, corsHeaders) {
     const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); let saved = 0; let skippedDeleted = 0;
     for (const transaction of transactions) { if (deletedIds.has(transaction.id)) { skippedDeleted += 1; continue; } const key = transactionKey(userId, transaction.id); const existingRaw = await env.PEMBUKUAN_KV.get(key); let shouldWrite = true; if (existingRaw) { try { const existing = JSON.parse(existingRaw); shouldWrite = getTimestamp(transaction) > getTimestamp(existing); } catch { shouldWrite = false; } } if (!shouldWrite) continue; await env.PEMBUKUAN_KV.put(key, JSON.stringify(transaction)); saved += 1; const tombstone = await env.PEMBUKUAN_KV.get(`${DELETED_PREFIX}${userId}:${transaction.id}`); if (tombstone) { await env.PEMBUKUAN_KV.delete(key); skippedDeleted += 1; } }
     const result = await listTransactions(userId, env, deletedIds);
+    if (saved > 0) { const raw = await env.PEMBUKUAN_KV.get(`user:${userId}`); let email = ''; try { email = raw ? JSON.parse(raw).email || '' : ''; } catch {} await recordAudit(env, { action: 'TRANSACTIONS_SYNC', status: 'SUCCESS', userId, email, metadata: { saved, skippedDeleted } }); }
     return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, saved, skippedDeleted, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders);
   } catch (error) { console.error('Save transactions error:', error); return jsonResponse({ error: 'Failed to save transactions' }, 500, corsHeaders); }
 }
@@ -238,13 +351,12 @@ function validateTransaction(transaction, fallbackTimestamp) {
   for (const field of ['createdAt', 'updatedAt']) { if (transaction[field] !== undefined) { if (typeof transaction[field] !== 'string') return { valid: false, error: `Invalid transaction ${field}` }; const parsed = Date.parse(transaction[field]); if (!Number.isFinite(parsed)) return { valid: false, error: `Invalid transaction ${field}` }; if (parsed > Date.now() + MAX_CLIENT_FUTURE_SKEW_MS) return { valid: false, error: `Transaction ${field} cannot be far in the future` }; } }
   return { valid: true };
 }
-
 function isValidDateOnly(value) { if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const date = new Date(`${value}T00:00:00Z`); return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value; }
 function transactionKey(userId, transactionId) { return `${TX_PREFIX}${userId}:${transactionId}`; }
 async function listTransactions(userId, env, deletedIds = new Set()) { const transactions = []; let cursor; do { const page = await env.PEMBUKUAN_KV.list({ prefix: `${TX_PREFIX}${userId}:`, cursor }); for (const key of page.keys) { if (deletedIds.has(key.name.slice(`${TX_PREFIX}${userId}:`.length))) continue; const raw = await env.PEMBUKUAN_KV.get(key.name); if (!raw) continue; try { const transaction = JSON.parse(raw); if (validateTransaction(transaction, new Date().toISOString()).valid) transactions.push(transaction); } catch {} } cursor = page.list_complete ? undefined : page.cursor; } while (cursor); transactions.sort((a, b) => { const dateDiff = new Date(b.date) - new Date(a.date); return dateDiff || getTimestamp(b) - getTimestamp(a); }); return transactions; }
 async function migrateLegacyTransactions(userId, env, deletedIds = new Set()) { const key = `${LEGACY_TRANSACTIONS_PREFIX}${userId}`; const raw = await env.PEMBUKUAN_KV.get(key); if (!raw) return; try { const legacy = JSON.parse(raw); if (!Array.isArray(legacy)) return; for (const transaction of legacy) { if (!validateTransaction(transaction, new Date().toISOString()).valid || deletedIds.has(transaction.id)) continue; const target = transactionKey(userId, transaction.id); if (!(await env.PEMBUKUAN_KV.get(target))) await env.PEMBUKUAN_KV.put(target, JSON.stringify(transaction)); } await env.PEMBUKUAN_KV.delete(key); } catch {} }
 async function handleGetTransactions(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: cannot access other user data' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); return jsonResponse({ success: true, userId, transactions, count: transactions.length, deletedIds: Array.from(deletedIds) }, 200, corsHeaders); } catch (error) { console.error('Get transactions error:', error); return jsonResponse({ error: 'Failed to get transactions' }, 500, corsHeaders); } }
-async function handleDeleteTransaction(userId, transactionId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); if (typeof transactionId !== 'string' || transactionId.length < 1 || transactionId.length > MAX_TRANSACTION_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(transactionId)) return jsonResponse({ error: 'Invalid transaction ID' }, 400, corsHeaders); const deletedAt = new Date().toISOString(); await env.PEMBUKUAN_KV.put(`${DELETED_PREFIX}${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt })); await env.PEMBUKUAN_KV.delete(transactionKey(userId, transactionId)); await env.PEMBUKUAN_KV.delete(`${LEGACY_TRANSACTIONS_PREFIX}${userId}`); return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders); } catch (error) { console.error('Delete transaction error:', error); return jsonResponse({ error: 'Failed to delete transaction' }, 500, corsHeaders); } }
+async function handleDeleteTransaction(userId, transactionId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); if (typeof transactionId !== 'string' || transactionId.length < 1 || transactionId.length > MAX_TRANSACTION_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(transactionId)) return jsonResponse({ error: 'Invalid transaction ID' }, 400, corsHeaders); const deletedAt = new Date().toISOString(); await env.PEMBUKUAN_KV.put(`${DELETED_PREFIX}${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt })); await env.PEMBUKUAN_KV.delete(transactionKey(userId, transactionId)); await env.PEMBUKUAN_KV.delete(`${LEGACY_TRANSACTIONS_PREFIX}${userId}`); const raw = await env.PEMBUKUAN_KV.get(`user:${userId}`); let email = ''; try { email = raw ? JSON.parse(raw).email || '' : ''; } catch {} await recordAudit(env, { action: 'TRANSACTION_DELETE', status: 'SUCCESS', userId, email, metadata: { transactionId } }); return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders); } catch (error) { console.error('Delete transaction error:', error); return jsonResponse({ error: 'Failed to delete transaction' }, 500, corsHeaders); } }
 async function getDeletedIds(userId, env) { const ids = []; let cursor; do { const page = await env.PEMBUKUAN_KV.list({ prefix: `${DELETED_PREFIX}${userId}:`, cursor }); for (const key of page.keys) ids.push(key.name.slice(`${DELETED_PREFIX}${userId}:`.length)); cursor = page.list_complete ? undefined : page.cursor; } while (cursor); return ids; }
 async function handleGetStats(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0); const expense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0); const stats = { totalIncome: income, totalExpense: expense, balance: income - expense, transactionCount: transactions.length }; return jsonResponse({ success: true, userId, stats, ...stats }, 200, corsHeaders); } catch (error) { console.error('Stats error:', error); return jsonResponse({ error: 'Failed to get stats' }, 500, corsHeaders); } }
 async function handleExport(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); return jsonResponse({ success: true, userId, transactions, count: transactions.length }, 200, corsHeaders); } catch (error) { console.error('Export error:', error); return jsonResponse({ error: 'Failed to export data' }, 500, corsHeaders); } }
