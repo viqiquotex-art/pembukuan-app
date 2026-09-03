@@ -1,29 +1,43 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>☁️ Cloud Login - Pembukuan App</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>☁️ Cloud Login - Pembukuan App</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px}.container{width:100%;max-width:450px;background:#fff;border-radius:15px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)}.header{padding:35px 20px;text-align:center;color:#fff;background:linear-gradient(135deg,#667eea,#764ba2)}.header h1{font-size:28px;margin-bottom:8px}.header p{font-size:14px;opacity:.9}.content{padding:35px}h2{font-size:20px;margin-bottom:20px;color:#333}.form-group{margin-bottom:18px}label{display:block;margin-bottom:7px;font-size:14px;font-weight:bold;color:#333}input{width:100%;padding:13px;border:2px solid #e0e0e0;border-radius:7px;font-size:14px}input:focus{outline:none;border-color:#667eea}.button-group{display:flex;gap:10px;margin-top:25px}button{flex:1;padding:13px;border:none;border-radius:7px;font-size:14px;font-weight:bold;cursor:pointer}button:disabled{opacity:.6;cursor:not-allowed}.btn-primary{color:#fff;background:linear-gradient(135deg,#667eea,#764ba2)}.btn-secondary{background:#f2f2f2;color:#333;border:1px solid #ddd}.alert{display:none;padding:12px;margin-bottom:20px;border-radius:7px;font-size:14px}.alert.show{display:block}.alert.success{background:#d4edda;color:#155724}.alert.error{background:#f8d7da;color:#721c24}.alert.info{background:#d1ecf1;color:#0c5460}.loading{display:none;text-align:center;color:#667eea;font-size:14px;margin:15px 0}.spinner{display:inline-block;width:15px;height:15px;border:3px solid #eee;border-top:3px solid #667eea;border-radius:50%;animation:spin 1s linear infinite;margin-right:7px;vertical-align:middle}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}.info{margin-top:20px;padding:15px;background:#f7f7f7;border-radius:7px;font-size:13px;line-height:1.6;color:#666}.back-link{text-align:center;margin-top:20px}.back-link a{color:#667eea;text-decoration:none;font-size:14px}@media(max-width:480px){.content{padding:25px}}
-</style></head>
-<body><div class="container"><div class="header"><h1>☁️ Cloud Storage</h1><p>Backup data Pembukuan Anda ke cloud</p></div><div class="content">
+</style>
+</head>
+<body>
+<div class="container"><div class="header"><h1>☁️ Cloud Storage</h1><p>Backup data Pembukuan Anda ke cloud</p></div><div class="content">
 <div id="alert" class="alert" role="alert" aria-live="polite"></div>
-<form id="loginForm" novalidate><h2>🔐 Login</h2><div class="form-group"><label for="loginEmail">Email</label><input type="email" id="loginEmail" placeholder="contoh@email.com" autocomplete="email" required></div><div class="form-group"><label for="loginPassword">Password</label><input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" required></div><div id="loginLoading" class="loading"><span class="spinner"></span>Menghubungkan ke cloud...</div><div class="button-group"><button type="submit" class="btn-primary" id="loginBtn">Login</button><button type="button" class="btn-secondary" id="showRegisterBtn">Register</button></div><div class="info">💡 Login digunakan untuk menyimpan dan mengambil data pembukuan Anda dari cloud.</div></form>
-<form id="registerForm" style="display:none" novalidate><h2>📝 Register</h2><div class="form-group"><label for="registerName">Nama Lengkap</label><input type="text" id="registerName" placeholder="Nama Anda" autocomplete="name" required></div><div class="form-group"><label for="registerEmail">Email</label><input type="email" id="registerEmail" placeholder="contoh@email.com" autocomplete="email" required></div><div class="form-group"><label for="registerPassword">Password</label><input type="password" id="registerPassword" placeholder="Minimal 8 karakter" autocomplete="new-password" minlength="8" required></div><div class="form-group"><label for="registerPasswordConfirm">Konfirmasi Password</label><input type="password" id="registerPasswordConfirm" placeholder="Ketik ulang password" autocomplete="new-password" required></div><div id="registerLoading" class="loading"><span class="spinner"></span>Membuat akun...</div><div class="button-group"><button type="submit" class="btn-primary" id="registerBtn">Register</button><button type="button" class="btn-secondary" id="showLoginBtn">Login</button></div><div class="info">✨ Dengan akun cloud Anda dapat:<br>• Backup data<br>• Sinkronisasi antar perangkat<br>• Mengakses data kapan saja</div></form>
+<form id="loginForm" novalidate><h2>🔐 Login</h2><div class="form-group"><label for="loginEmail">Email</label><input type="email" id="loginEmail" placeholder="contoh@email.com" autocomplete="email" required></div><div class="form-group"><label for="loginPassword">Password</label><input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password" required></div><div id="loginLoading" class="loading"><span class="spinner"></span>Menghubungkan ke cloud...</div><div class="button-group"><button type="submit" class="btn btn-primary" id="loginBtn">Login</button><button type="button" class="btn btn-secondary" id="showRegisterBtn">Register</button></div><div class="info">💡 Login digunakan untuk menyimpan dan mengambil data pembukuan Anda dari cloud.</div></form>
+<form id="registerForm" style="display:none" novalidate><h2>📝 Register</h2><div class="form-group"><label for="registerName">Nama Lengkap</label><input type="text" id="registerName" placeholder="Nama Anda" autocomplete="name" required></div><div class="form-group"><label for="registerEmail">Email</label><input type="email" id="registerEmail" placeholder="contoh@email.com" autocomplete="email" required></div><div class="form-group"><label for="registerPassword">Password</label><input type="password" id="registerPassword" placeholder="Minimal 8 karakter" autocomplete="new-password" minlength="8" required></div><div class="form-group"><label for="registerPasswordConfirm">Konfirmasi Password</label><input type="password" id="registerPasswordConfirm" placeholder="Ketik ulang password" autocomplete="new-password" required></div><div id="registerLoading" class="loading"><span class="spinner"></span>Membuat akun...</div><div class="button-group"><button type="submit" class="btn btn-primary" id="registerBtn">Register</button><button type="button" class="btn btn-secondary" id="showLoginBtn">Login</button></div><div class="info">✨ Dengan akun cloud Anda dapat:<br>• Backup data<br>• Sinkronisasi antar perangkat<br>• Mengakses data kapan saja</div></form>
 <div class="back-link"><a href="./index.html">← Kembali ke Aplikasi</a></div></div></div>
+<script src="./cloud.js"></script>
 <script>
 'use strict';
-const API_BASE_URL='https://pembukuan-app.viqiquotex.workers.dev';
-const API={register:`${API_BASE_URL}/api/auth/register`,login:`${API_BASE_URL}/api/auth/login`,profile:`${API_BASE_URL}/api/auth/profile`};
-const $=id=>document.getElementById(id);
-function showAlert(message,type='info'){const alert=$('alert');if(!alert)return;alert.className=`alert ${type} show`;alert.textContent=message}
-function hideAlert(){const alert=$('alert');if(alert)alert.className='alert'}
-function setLoading(type,loading){const button=$(type==='login'?'loginBtn':'registerBtn');const loadingEl=$(type==='login'?'loginLoading':'registerLoading');if(button)button.disabled=loading;if(loadingEl)loadingEl.style.display=loading?'block':'none'}
-function saveIdentity(data){if(!data||!data.userId)throw new Error('Server tidak mengembalikan identitas pengguna');localStorage.setItem('cloud_userId',data.userId);localStorage.setItem('cloud_email',data.email||'');localStorage.setItem('cloud_name',data.name||'');if(data.token)localStorage.setItem('cloud_token',data.token);localStorage.removeItem('cloud_credentials')}
-function authFetch(url,options={}){const headers=new Headers(options.headers||{});const token=localStorage.getItem('cloud_token');if(token)headers.set('Authorization',`Bearer ${token}`);return fetch(url,{...options,headers,credentials:'include'})}
-function toggleForm(showRegister){$('loginForm').style.display=showRegister?'none':'block';$('registerForm').style.display=showRegister?'block':'none';hideAlert()}
-async function readResponse(response){try{return await response.json()}catch{return {}}}
-async function submitAuth(type){hideAlert();const isLogin=type==='login';const email=$(isLogin?'loginEmail':'registerEmail').value.trim().toLowerCase();const password=$(isLogin?'loginPassword':'registerPassword').value;if(!email||!password)return showAlert(isLogin?'❌ Email dan password harus diisi.':'❌ Semua field harus diisi.','error');if(!isLogin){const name=$('registerName').value.trim();const confirmPassword=$('registerPasswordConfirm').value;if(!name)return showAlert('❌ Nama lengkap harus diisi.','error');if(password.length<8)return showAlert('❌ Password minimal 8 karakter.','error');if(password!==confirmPassword)return showAlert('❌ Password tidak cocok.','error')}setLoading(type,true);try{const body=isLogin?{email,password}:{name:$('registerName').value.trim(),email,password};const response=await fetch(isLogin?API.login:API.register,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(body)});const data=await readResponse(response);if(!response.ok){showAlert(`❌ ${data.error||`Request gagal (${response.status})`}`,'error');return}saveIdentity(data);showAlert(`✅ ${isLogin?'Login':'Register'} berhasil! Mengarahkan ke aplikasi...`,'success');setTimeout(()=>{window.location.href='./index.html'},800)}catch(error){console.error(`${type.toUpperCase()} ERROR:`,error);showAlert(`❌ Tidak dapat terhubung ke server: ${error.message}`,'error')}finally{setLoading(type,false)}}
-async function checkExistingSession(){if(!localStorage.getItem('cloud_userId')&&!localStorage.getItem('cloud_token'))return;try{const response=await authFetch(API.profile,{method:'GET',headers:{'Accept':'application/json'}});if(!response.ok)return;const data=await readResponse(response);if(data.userId){saveIdentity(data);showAlert('✅ Anda sudah login. Mengarahkan ke aplikasi...','info');setTimeout(()=>{window.location.href='./index.html'},800)}}catch(error){console.warn('Session check failed:',error)}}
-function initAuthPage(){$('loginForm').addEventListener('submit',e=>{e.preventDefault();submitAuth('login')});$('registerForm').addEventListener('submit',e=>{e.preventDefault();submitAuth('register')});$('showRegisterBtn').addEventListener('click',()=>toggleForm(true));$('showLoginBtn').addEventListener('click',()=>toggleForm(false));checkExistingSession()}
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initAuthPage);else initAuthPage();
-</script></body></html>
+function toggleAuthForm(showRegister){
+  document.getElementById('loginForm').style.display=showRegister?'none':'block';
+  document.getElementById('registerForm').style.display=showRegister?'block':'none';
+  hideAlert();
+}
+function initCloudAuthPage(){
+  document.getElementById('loginForm').addEventListener('submit',handleLogin);
+  document.getElementById('registerForm').addEventListener('submit',handleRegister);
+  document.getElementById('showRegisterBtn').addEventListener('click',()=>toggleAuthForm(true));
+  document.getElementById('showLoginBtn').addEventListener('click',()=>toggleAuthForm(false));
+  checkExistingCloudSession();
+}
+async function checkExistingCloudSession(){
+  if(!getCloudCredentials()?.token)return;
+  const valid=await validateCloudSession();
+  if(valid){
+    showAlert('✅ Anda sudah login. Mengarahkan ke aplikasi...','info');
+    setTimeout(()=>{window.location.href='./index.html'},800);
+  }
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initCloudAuthPage);else initCloudAuthPage();
+</script>
+</body>
+</html>
