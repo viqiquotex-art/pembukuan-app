@@ -145,56 +145,62 @@ async function handleGetProfile(request, env, corsHeaders) {
 
 async function handleGetUsers(request, env, corsHeaders) {
   try {
-    const ownerId = await requireOwner(request, env); if (!ownerId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
-    const adminEmail = env.ADMIN_EMAIL ? env.ADMIN_EMAIL.trim().toLowerCase() : '';
-    const ownerData = await env.PEMBUKUAN_KV.get(`user:${ownerId}`); if (!ownerData) return jsonResponse({ error: 'Admin user not found' }, 404, corsHeaders);
-    const owner = JSON.parse(ownerData); if (!adminEmail || owner.email !== adminEmail) return jsonResponse({ error: 'Forbidden: admin access required' }, 403, corsHeaders);
-    const users = []; let cursor;
-    do { const page = await env.PEMBUKUAN_KV.list({ prefix: 'user:', cursor }); for (const key of page.keys) { const value = await env.PEMBUKUAN_KV.get(key.name); if (!value) continue; try { const user = JSON.parse(value); if (key.name === `user:${user.userId}`) users.push({ userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin }); } catch {} } cursor = page.list_complete ? undefined : page.cursor; } while (cursor);
-    users.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); return jsonResponse({ success: true, count: users.length, users }, 200, corsHeaders);
-  } catch (error) { console.error('Admin users error:', error); return jsonResponse({ error: 'Failed to get users' }, 500, corsHeaders); }
+    const ownerId = await requireOwner(request, env);
+    if (!ownerId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
+
+    const adminEmail = typeof env.ADMIN_EMAIL === 'string' ? env.ADMIN_EMAIL.trim().toLowerCase() : '';
+    if (!adminEmail) return jsonResponse({ error: 'Admin configuration is missing' }, 503, corsHeaders);
+
+    const ownerData = await env.PEMBUKUAN_KV.get(`user:${ownerId}`);
+    if (!ownerData) return jsonResponse({ error: 'Admin user not found' }, 404, corsHeaders);
+
+    const owner = JSON.parse(ownerData);
+    const ownerEmail = typeof owner.email === 'string' ? owner.email.trim().toLowerCase() : '';
+    const isAdmin = ownerEmail === adminEmail;
+    if (!isAdmin) return jsonResponse({ error: 'Forbidden: admin access required' }, 403, corsHeaders);
+
+    const users = [];
+    let cursor;
+    do {
+      const page = await env.PEMBUKUAN_KV.list({ prefix: 'user:', cursor });
+      for (const key of page.keys) {
+        const value = await env.PEMBUKUAN_KV.get(key.name);
+        if (!value) continue;
+        try {
+          const user = JSON.parse(value);
+          if (key.name === `user:${user.userId}`) {
+            const userEmail = typeof user.email === 'string' ? user.email.trim().toLowerCase() : '';
+            users.push({
+              userId: user.userId,
+              name: user.name,
+              email: user.email,
+              createdAt: user.createdAt,
+              lastLogin: user.lastLogin,
+              isAdmin: userEmail === adminEmail
+            });
+          }
+        } catch {}
+      }
+      cursor = page.list_complete ? undefined : page.cursor;
+    } while (cursor);
+
+    users.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return jsonResponse({ success: true, count: users.length, users }, 200, corsHeaders);
+  } catch (error) {
+    console.error('Admin users error:', error);
+    return jsonResponse({ error: 'Failed to get users' }, 500, corsHeaders);
+  }
 }
 
 async function handleSaveTransactions(request, env, corsHeaders) {
-  try {
-    const body = await request.json(); const { userId, transactions } = body || {};
+  try { const body = await request.json(); const { userId, transactions } = body || {};
     if (typeof userId !== 'string' || !userId.trim() || userId.length > MAX_USER_ID_LENGTH || !Array.isArray(transactions)) return jsonResponse({ error: 'Invalid userId or transactions' }, 400, corsHeaders);
     if (transactions.length > MAX_TRANSACTIONS_PER_SYNC) return jsonResponse({ error: `Maximum ${MAX_TRANSACTIONS_PER_SYNC} transactions per sync` }, 400, corsHeaders);
     const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: token does not match user' }, 403, corsHeaders);
-    const now = new Date().toISOString();
-    const incomingIds = new Set();
-    for (const transaction of transactions) {
-      const validation = validateTransaction(transaction, now);
-      if (!validation.valid) return jsonResponse({ error: validation.error }, 400, corsHeaders);
-      if (incomingIds.has(transaction.id)) return jsonResponse({ error: `Duplicate transaction ID in sync: ${transaction.id}` }, 400, corsHeaders);
-      incomingIds.add(transaction.id);
-    }
-    const deletedIds = new Set(await getDeletedIds(userId, env));
-    await migrateLegacyTransactions(userId, env, deletedIds);
-    let saved = 0;
-    let skippedDeleted = 0;
-    for (const transaction of transactions) {
-      if (deletedIds.has(transaction.id)) { skippedDeleted += 1; continue; }
-      const key = transactionKey(userId, transaction.id);
-      const existingRaw = await env.PEMBUKUAN_KV.get(key);
-      let shouldWrite = true;
-      if (existingRaw) {
-        try {
-          const existing = JSON.parse(existingRaw);
-          shouldWrite = getTimestamp(transaction) > getTimestamp(existing);
-        } catch { shouldWrite = false; }
-      }
-      if (!shouldWrite) continue;
-      await env.PEMBUKUAN_KV.put(key, JSON.stringify(transaction));
-      saved += 1;
-      // Delete tombstones win over concurrent sync writes. If a delete raced this write,
-      // remove the just-written transaction so a deleted record cannot resurrect.
-      const tombstone = await env.PEMBUKUAN_KV.get(`${DELETED_PREFIX}${userId}:${transaction.id}`);
-      if (tombstone) {
-        await env.PEMBUKUAN_KV.delete(key);
-        skippedDeleted += 1;
-      }
-    }
+    const now = new Date().toISOString(); const incomingIds = new Set();
+    for (const transaction of transactions) { const validation = validateTransaction(transaction, now); if (!validation.valid) return jsonResponse({ error: validation.error }, 400, corsHeaders); if (incomingIds.has(transaction.id)) return jsonResponse({ error: `Duplicate transaction ID in sync: ${transaction.id}` }, 400, corsHeaders); incomingIds.add(transaction.id); }
+    const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); let saved = 0; let skippedDeleted = 0;
+    for (const transaction of transactions) { if (deletedIds.has(transaction.id)) { skippedDeleted += 1; continue; } const key = transactionKey(userId, transaction.id); const existingRaw = await env.PEMBUKUAN_KV.get(key); let shouldWrite = true; if (existingRaw) { try { const existing = JSON.parse(existingRaw); shouldWrite = getTimestamp(transaction) > getTimestamp(existing); } catch { shouldWrite = false; } } if (!shouldWrite) continue; await env.PEMBUKUAN_KV.put(key, JSON.stringify(transaction)); saved += 1; const tombstone = await env.PEMBUKUAN_KV.get(`${DELETED_PREFIX}${userId}:${transaction.id}`); if (tombstone) { await env.PEMBUKUAN_KV.delete(key); skippedDeleted += 1; } }
     const result = await listTransactions(userId, env, deletedIds);
     return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, saved, skippedDeleted, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders);
   } catch (error) { console.error('Save transactions error:', error); return jsonResponse({ error: 'Failed to save transactions' }, 500, corsHeaders); }
@@ -208,14 +214,7 @@ function validateTransaction(transaction, fallbackTimestamp) {
   if (typeof transaction.amount !== 'number' || !Number.isFinite(transaction.amount) || transaction.amount <= 0 || transaction.amount > MAX_TRANSACTION_AMOUNT) return { valid: false, error: 'Transaction amount must be a valid positive number' };
   if (typeof transaction.date !== 'string' || !isValidDateOnly(transaction.date)) return { valid: false, error: 'Transaction date must be a valid YYYY-MM-DD date' };
   if (transaction.description !== undefined && transaction.description !== null && (typeof transaction.description !== 'string' || transaction.description.length > MAX_DESCRIPTION_LENGTH)) return { valid: false, error: 'Invalid transaction description' };
-  for (const field of ['createdAt', 'updatedAt']) {
-    if (transaction[field] !== undefined) {
-      if (typeof transaction[field] !== 'string') return { valid: false, error: `Invalid transaction ${field}` };
-      const parsed = Date.parse(transaction[field]);
-      if (!Number.isFinite(parsed)) return { valid: false, error: `Invalid transaction ${field}` };
-      if (parsed > Date.now() + MAX_CLIENT_FUTURE_SKEW_MS) return { valid: false, error: `Transaction ${field} cannot be far in the future` };
-    }
-  }
+  for (const field of ['createdAt', 'updatedAt']) { if (transaction[field] !== undefined) { if (typeof transaction[field] !== 'string') return { valid: false, error: `Invalid transaction ${field}` }; const parsed = Date.parse(transaction[field]); if (!Number.isFinite(parsed)) return { valid: false, error: `Invalid transaction ${field}` }; if (parsed > Date.now() + MAX_CLIENT_FUTURE_SKEW_MS) return { valid: false, error: `Transaction ${field} cannot be far in the future` }; } }
   return { valid: true };
 }
 
