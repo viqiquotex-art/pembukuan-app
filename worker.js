@@ -22,6 +22,7 @@ const MAX_USER_ID_LENGTH = 100;
 const TX_PREFIX = 'tx:';
 const DELETED_PREFIX = 'deleted:';
 const LEGACY_TRANSACTIONS_PREFIX = 'transactions:';
+const MAX_CLIENT_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 export default {
   async fetch(request, env) {
@@ -160,20 +161,42 @@ async function handleSaveTransactions(request, env, corsHeaders) {
     if (typeof userId !== 'string' || !userId.trim() || userId.length > MAX_USER_ID_LENGTH || !Array.isArray(transactions)) return jsonResponse({ error: 'Invalid userId or transactions' }, 400, corsHeaders);
     if (transactions.length > MAX_TRANSACTIONS_PER_SYNC) return jsonResponse({ error: `Maximum ${MAX_TRANSACTIONS_PER_SYNC} transactions per sync` }, 400, corsHeaders);
     const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: token does not match user' }, 403, corsHeaders);
-    const now = new Date().toISOString(); for (const transaction of transactions) { const validation = validateTransaction(transaction, now); if (!validation.valid) return jsonResponse({ error: validation.error }, 400, corsHeaders); }
+    const now = new Date().toISOString();
+    const incomingIds = new Set();
+    for (const transaction of transactions) {
+      const validation = validateTransaction(transaction, now);
+      if (!validation.valid) return jsonResponse({ error: validation.error }, 400, corsHeaders);
+      if (incomingIds.has(transaction.id)) return jsonResponse({ error: `Duplicate transaction ID in sync: ${transaction.id}` }, 400, corsHeaders);
+      incomingIds.add(transaction.id);
+    }
     const deletedIds = new Set(await getDeletedIds(userId, env));
     await migrateLegacyTransactions(userId, env, deletedIds);
     let saved = 0;
+    let skippedDeleted = 0;
     for (const transaction of transactions) {
-      if (deletedIds.has(transaction.id)) continue;
+      if (deletedIds.has(transaction.id)) { skippedDeleted += 1; continue; }
       const key = transactionKey(userId, transaction.id);
       const existingRaw = await env.PEMBUKUAN_KV.get(key);
       let shouldWrite = true;
-      if (existingRaw) { try { const existing = JSON.parse(existingRaw); shouldWrite = getTimestamp(transaction) >= getTimestamp(existing); } catch {} }
-      if (shouldWrite) { await env.PEMBUKUAN_KV.put(key, JSON.stringify(transaction)); saved += 1; }
+      if (existingRaw) {
+        try {
+          const existing = JSON.parse(existingRaw);
+          shouldWrite = getTimestamp(transaction) > getTimestamp(existing);
+        } catch { shouldWrite = false; }
+      }
+      if (!shouldWrite) continue;
+      await env.PEMBUKUAN_KV.put(key, JSON.stringify(transaction));
+      saved += 1;
+      // Delete tombstones win over concurrent sync writes. If a delete raced this write,
+      // remove the just-written transaction so a deleted record cannot resurrect.
+      const tombstone = await env.PEMBUKUAN_KV.get(`${DELETED_PREFIX}${userId}:${transaction.id}`);
+      if (tombstone) {
+        await env.PEMBUKUAN_KV.delete(key);
+        skippedDeleted += 1;
+      }
     }
     const result = await listTransactions(userId, env, deletedIds);
-    return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, saved, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders);
+    return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, saved, skippedDeleted, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders);
   } catch (error) { console.error('Save transactions error:', error); return jsonResponse({ error: 'Failed to save transactions' }, 500, corsHeaders); }
 }
 
@@ -185,6 +208,14 @@ function validateTransaction(transaction, fallbackTimestamp) {
   if (typeof transaction.amount !== 'number' || !Number.isFinite(transaction.amount) || transaction.amount <= 0 || transaction.amount > MAX_TRANSACTION_AMOUNT) return { valid: false, error: 'Transaction amount must be a valid positive number' };
   if (typeof transaction.date !== 'string' || !isValidDateOnly(transaction.date)) return { valid: false, error: 'Transaction date must be a valid YYYY-MM-DD date' };
   if (transaction.description !== undefined && transaction.description !== null && (typeof transaction.description !== 'string' || transaction.description.length > MAX_DESCRIPTION_LENGTH)) return { valid: false, error: 'Invalid transaction description' };
+  for (const field of ['createdAt', 'updatedAt']) {
+    if (transaction[field] !== undefined) {
+      if (typeof transaction[field] !== 'string') return { valid: false, error: `Invalid transaction ${field}` };
+      const parsed = Date.parse(transaction[field]);
+      if (!Number.isFinite(parsed)) return { valid: false, error: `Invalid transaction ${field}` };
+      if (parsed > Date.now() + MAX_CLIENT_FUTURE_SKEW_MS) return { valid: false, error: `Transaction ${field} cannot be far in the future` };
+    }
+  }
   return { valid: true };
 }
 
