@@ -3,8 +3,6 @@
 // ==========================================
 
 (function () {
-  const originalDeleteTransaction = window.deleteTransaction;
-
   window.deleteTransaction = async function (id) {
     if (!confirm('Yakin hapus transaksi ini?')) return;
 
@@ -22,6 +20,12 @@
         showToast('❌ Transaksi tidak ditemukan', 'error');
       }
       return;
+    }
+
+    // Tandai sebagai terhapus SEBELUM request cloud.
+    // Ini mencegah transaksi lama muncul kembali saat sync/load.
+    if (typeof addLocalDeletedTransactionId === 'function') {
+      addLocalDeletedTransactionId(id);
     }
 
     // Hapus lokal terlebih dahulu agar UI langsung responsif.
