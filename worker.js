@@ -12,6 +12,12 @@ const REGISTER_MAX_ATTEMPTS = 5;
 const REGISTER_WINDOW_SECONDS = 60 * 60;
 const RATE_LIMIT_PREFIX = 'rate:';
 const SESSION_COOKIE = 'session';
+const MAX_TRANSACTIONS_PER_SYNC = 1000;
+const MAX_TRANSACTION_ID_LENGTH = 100;
+const MAX_CATEGORY_LENGTH = 80;
+const MAX_DESCRIPTION_LENGTH = 500;
+const MAX_TRANSACTION_AMOUNT = 1_000_000_000_000_000;
+const MAX_USER_ID_LENGTH = 100;
 
 export default {
   async fetch(request, env) {
@@ -47,7 +53,7 @@ async function handleRegister(request, env, corsHeaders) {
     if (!email || !password || !name) return jsonResponse({ error: 'Missing required fields: email, password, name' }, 400, corsHeaders);
     if (!isValidEmail(email)) return jsonResponse({ error: 'Invalid email format' }, 400, corsHeaders);
     if (typeof password !== 'string' || password.length < 8) return jsonResponse({ error: 'Password must be at least 8 characters' }, 400, corsHeaders);
-    if (typeof name !== 'string' || name.trim().length < 2) return jsonResponse({ error: 'Name must be at least 2 characters' }, 400, corsHeaders);
+    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 100) return jsonResponse({ error: 'Name must be between 2 and 100 characters' }, 400, corsHeaders);
     const kv = env.PEMBUKUAN_KV;
     if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
     const normalizedEmail = email.trim().toLowerCase();
@@ -71,8 +77,10 @@ async function handleLogin(request, env, corsHeaders) {
     const body = await request.json();
     const { email, password } = body || {};
     if (!email || !password) return jsonResponse({ error: 'Missing email or password' }, 400, corsHeaders);
+    if (typeof email !== 'string' || email.length > 254 || !isValidEmail(email)) return jsonResponse({ error: 'Invalid email format' }, 400, corsHeaders);
+    if (typeof password !== 'string' || password.length > 1000) return jsonResponse({ error: 'Invalid password' }, 400, corsHeaders);
     const kv = env.PEMBUKUAN_KV;
-    if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
+    if (!kv) throw new Error('PEMBUCUAN_KV binding is not configured');
     const normalizedEmail = email.trim().toLowerCase();
     const rate = await checkRateLimit(kv, `login:${normalizedEmail}`, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS);
     if (!rate.allowed) return rateLimitResponse(rate, corsHeaders);
@@ -107,7 +115,7 @@ async function checkRateLimit(kv, identifier, maxAttempts, windowSeconds) {
   return { allowed: true, retryAfter: remainingTtl, limit: maxAttempts, remaining: Math.max(0, maxAttempts - state.count) };
 }
 async function clearRateLimit(kv, identifier) { await kv.delete(`${RATE_LIMIT_PREFIX}${identifier}`); }
-function rateLimitResponse(rate, corsHeaders) { return jsonResponse({ error: 'Too many authentication attempts. Please try again later.', retryAfter: rate.retryAfter }, 429, withCookie(corsHeaders)); }
+function rateLimitResponse(rate, corsHeaders) { return jsonResponse({ error: 'Too many authentication attempts. Please try again later.', retryAfter: rate.retryAfter }, 429, { ...corsHeaders, 'Retry-After': String(rate.retryAfter) }); }
 
 async function handleLogout(request, env, corsHeaders) {
   try {
@@ -124,16 +132,62 @@ async function handleGetUsers(request, env, corsHeaders) {
   try { const ownerId = await requireOwner(request, env); if (!ownerId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); const adminEmail = env.ADMIN_EMAIL ? env.ADMIN_EMAIL.trim().toLowerCase() : ''; const ownerData = await env.PEMBUKUAN_KV.get(`user:${ownerId}`); if (!ownerData) return jsonResponse({ error: 'Admin user not found' }, 404, corsHeaders); const owner = JSON.parse(ownerData); if (!adminEmail || owner.email !== adminEmail) return jsonResponse({ error: 'Forbidden: admin access required' }, 403, corsHeaders); const users = []; let cursor; do { const page = await env.PEMBUKUAN_KV.list({ prefix: 'user:', cursor }); for (const key of page.keys) { const value = await env.PEMBUKUAN_KV.get(key.name); if (!value) continue; try { const user = JSON.parse(value); if (key.name === `user:${user.userId}`) users.push({ userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin }); } catch {} } cursor = page.list_complete ? undefined : page.cursor; } while (cursor); users.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)); return jsonResponse({ success: true, count: users.length, users }, 200, corsHeaders); }
   catch (error) { console.error('Admin users error:', error); return jsonResponse({ error: 'Failed to get users' }, 500, corsHeaders); }
 }
+
 async function handleSaveTransactions(request, env, corsHeaders) {
-  try { const body = await request.json(); const { userId, transactions } = body; if (!userId || !Array.isArray(transactions)) return jsonResponse({ error: 'Missing required fields: userId, transactions' }, 400, corsHeaders); const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: token does not match user' }, 403, corsHeaders); const now = new Date().toISOString(); for (const transaction of transactions) { if (!transaction.id || !transaction.type || transaction.amount === undefined || !transaction.date) return jsonResponse({ error: 'Invalid transaction format' }, 400, corsHeaders); if (!['income', 'expense'].includes(transaction.type)) return jsonResponse({ error: 'Transaction type must be income or expense' }, 400, corsHeaders); if (typeof transaction.amount !== 'number' || !Number.isFinite(transaction.amount) || transaction.amount <= 0) return jsonResponse({ error: 'Transaction amount must be a valid positive number' }, 400, corsHeaders); if (!transaction.updatedAt || Number.isNaN(Date.parse(transaction.updatedAt))) transaction.updatedAt = transaction.createdAt && !Number.isNaN(Date.parse(transaction.createdAt)) ? transaction.createdAt : now; } const deletedIds = new Set(await getDeletedIds(userId, env)); const key = `transactions:${userId}`; const existingRaw = await env.PEMBUKUAN_KV.get(key); const existing = existingRaw ? JSON.parse(existingRaw) : []; const merged = new Map(); for (const oldTx of existing) { if (oldTx && oldTx.id && !deletedIds.has(oldTx.id)) merged.set(oldTx.id, oldTx); } for (const newTx of transactions) { if (deletedIds.has(newTx.id)) continue; const oldTx = merged.get(newTx.id); if (!oldTx || getTimestamp(newTx) >= getTimestamp(oldTx)) merged.set(newTx.id, newTx); } const result = Array.from(merged.values()).sort((a, b) => new Date(b.date) - new Date(a.date)); await env.PEMBUKUAN_KV.put(key, JSON.stringify(result)); return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders); }
-  catch (error) { console.error('Save transactions error:', error); return jsonResponse({ error: 'Failed to save transactions' }, 500, corsHeaders); }
+  try {
+    const body = await request.json();
+    const { userId, transactions } = body || {};
+    if (typeof userId !== 'string' || !userId.trim() || userId.length > MAX_USER_ID_LENGTH || !Array.isArray(transactions)) return jsonResponse({ error: 'Invalid userId or transactions' }, 400, corsHeaders);
+    if (transactions.length > MAX_TRANSACTIONS_PER_SYNC) return jsonResponse({ error: `Maximum ${MAX_TRANSACTIONS_PER_SYNC} transactions per sync` }, 400, corsHeaders);
+    const tokenOwner = await requireOwner(request, env);
+    if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders);
+    if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: token does not match user' }, 403, corsHeaders);
+    const now = new Date().toISOString();
+    for (const transaction of transactions) {
+      const validation = validateTransaction(transaction, now);
+      if (!validation.valid) return jsonResponse({ error: validation.error }, 400, corsHeaders);
+    }
+    const deletedIds = new Set(await getDeletedIds(userId, env));
+    const key = `transactions:${userId}`;
+    const existingRaw = await env.PEMBUKUAN_KV.get(key);
+    const existing = existingRaw ? JSON.parse(existingRaw) : [];
+    const merged = new Map();
+    for (const oldTx of existing) { if (oldTx && oldTx.id && !deletedIds.has(oldTx.id)) merged.set(oldTx.id, oldTx); }
+    for (const newTx of transactions) { if (deletedIds.has(newTx.id)) continue; const oldTx = merged.get(newTx.id); if (!oldTx || getTimestamp(newTx) >= getTimestamp(oldTx)) merged.set(newTx.id, newTx); }
+    const result = Array.from(merged.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
+    await env.PEMBUKUAN_KV.put(key, JSON.stringify(result));
+    return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders);
+  } catch (error) { console.error('Save transactions error:', error); return jsonResponse({ error: 'Failed to save transactions' }, 500, corsHeaders); }
 }
+
+function validateTransaction(transaction, fallbackTimestamp) {
+  if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) return { valid: false, error: 'Invalid transaction object' };
+  if (typeof transaction.id !== 'string' || transaction.id.length < 1 || transaction.id.length > MAX_TRANSACTION_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(transaction.id)) return { valid: false, error: 'Invalid transaction ID' };
+  if (transaction.type !== 'income' && transaction.type !== 'expense') return { valid: false, error: 'Transaction type must be income or expense' };
+  if (typeof transaction.category !== 'string' || transaction.category.trim().length < 1 || transaction.category.length > MAX_CATEGORY_LENGTH) return { valid: false, error: 'Invalid transaction category' };
+  if (typeof transaction.amount !== 'number' || !Number.isFinite(transaction.amount) || transaction.amount <= 0 || transaction.amount > MAX_TRANSACTION_AMOUNT) return { valid: false, error: 'Transaction amount must be a valid positive number' };
+  if (typeof transaction.date !== 'string' || !isValidDateOnly(transaction.date)) return { valid: false, error: 'Transaction date must be a valid YYYY-MM-DD date' };
+  if (transaction.description !== undefined && transaction.description !== null && (typeof transaction.description !== 'string' || transaction.description.length > MAX_DESCRIPTION_LENGTH)) return { valid: false, error: 'Transaction description is invalid or too long' };
+  if (transaction.createdAt !== undefined && (typeof transaction.createdAt !== 'string' || transaction.createdAt.length > 40 || Number.isNaN(Date.parse(transaction.createdAt)))) return { valid: false, error: 'Invalid createdAt timestamp' };
+  if (transaction.updatedAt !== undefined && (typeof transaction.updatedAt !== 'string' || transaction.updatedAt.length > 40 || Number.isNaN(Date.parse(transaction.updatedAt)))) return { valid: false, error: 'Invalid updatedAt timestamp' };
+  if (!transaction.updatedAt) transaction.updatedAt = transaction.createdAt || fallbackTimestamp;
+  if (!transaction.createdAt) transaction.createdAt = transaction.updatedAt || fallbackTimestamp;
+  return { valid: true };
+}
+
+function isValidDateOnly(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 async function handleGetTransactions(userId, request, env, corsHeaders) {
   try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: cannot access other user data' }, 403, corsHeaders); const deletedIds = await getDeletedIds(userId, env); const deletedSet = new Set(deletedIds); const data = await env.PEMBUKUAN_KV.get(`transactions:${userId}`); const rawTransactions = data ? JSON.parse(data) : []; const transactions = rawTransactions.filter(t => t && t.id && !deletedSet.has(t.id)); if (transactions.length !== rawTransactions.length) await env.PEMBUKUAN_KV.put(`transactions:${userId}`, JSON.stringify(transactions)); return jsonResponse({ success: true, userId, transactions, count: transactions.length, deletedIds }, 200, corsHeaders); }
   catch (error) { console.error('Get transactions error:', error); return jsonResponse({ error: 'Failed to get transactions' }, 500, corsHeaders); }
 }
 async function handleDeleteTransaction(userId, transactionId, request, env, corsHeaders) {
-  try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); if (!transactionId) return jsonResponse({ error: 'Transaction ID is required' }, 400, corsHeaders); const deletedAt = new Date().toISOString(); await env.PEMBUKUAN_KV.put(`deleted:${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt })); const key = `transactions:${userId}`; const data = await env.PEMBUKUAN_KV.get(key); const transactions = data ? JSON.parse(data) : []; const filtered = transactions.filter(t => t.id !== transactionId); if (filtered.length !== transactions.length) await env.PEMBUKUAN_KV.put(key, JSON.stringify(filtered)); return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders); }
+  try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); if (typeof transactionId !== 'string' || transactionId.length < 1 || transactionId.length > MAX_TRANSACTION_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(transactionId)) return jsonResponse({ error: 'Invalid transaction ID' }, 400, corsHeaders); const deletedAt = new Date().toISOString(); await env.PEMBUKUAN_KV.put(`deleted:${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt })); const key = `transactions:${userId}`; const data = await env.PEMBUKUAN_KV.get(key); const transactions = data ? JSON.parse(data) : []; const filtered = transactions.filter(t => t.id !== transactionId); if (filtered.length !== transactions.length) await env.PEMBUKUAN_KV.put(key, JSON.stringify(filtered)); return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders); }
   catch (error) { console.error('Delete transaction error:', error); return jsonResponse({ error: 'Failed to delete transaction' }, 500, corsHeaders); }
 }
 async function getDeletedIds(userId, env) { const ids = []; let cursor; do { const page = await env.PEMBUKUAN_KV.list({ prefix: `deleted:${userId}:`, cursor }); for (const key of page.keys) ids.push(key.name.slice(`deleted:${userId}:`.length)); cursor = page.list_complete ? undefined : page.cursor; } while (cursor); return ids; }
@@ -145,43 +199,21 @@ async function handleExport(userId, request, env, corsHeaders) {
   try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); const data = await env.PEMBUKUAN_KV.get(`transactions:${userId}`); const transactions = (data ? JSON.parse(data) : []).filter(t => t && !deletedIds.has(t.id)); return jsonResponse({ success: true, userId, transactions, count: transactions.length }, 200, corsHeaders); }
   catch (error) { console.error('Export error:', error); return jsonResponse({ error: 'Failed to export data' }, 500, corsHeaders); }
 }
-
 function requireOwner(request, env) { return getTokenOwner(getAuthToken(request), env.PEMBUKUAN_KV); }
 function getTimestamp(transaction) { const value = transaction && (transaction.updatedAt || transaction.createdAt); const timestamp = value ? Date.parse(value) : 0; return Number.isFinite(timestamp) ? timestamp : 0; }
-
 function getCorsHeaders(request, env) {
   const requestOrigin = request.headers.get('Origin');
   const configuredOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean) : [];
   const defaultOrigins = ['https://viqiquotex-art.github.io', 'https://vixora.my.id', 'https://www.vixora.my.id', 'http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
   const allowedOrigins = configuredOrigins.length ? configuredOrigins : defaultOrigins;
-  const headers = {
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Credentials': 'true',
-    'Access-Control-Max-Age': '86400',
-    'Content-Type': 'application/json',
-    'Vary': 'Origin',
-    'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'strict-origin-when-cross-origin',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://pembukuan-app.viqiquotex.workers.dev; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()'
-  };
+  const headers = { 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Max-Age': '86400', 'Content-Type': 'application/json', 'Vary': 'Origin', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Content-Security-Policy': "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://pembukuan-app.viqiquotex.workers.dev; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'", 'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()' };
   if (requestOrigin && allowedOrigins.includes(requestOrigin)) headers['Access-Control-Allow-Origin'] = requestOrigin;
   return headers;
 }
 function withCookie(headers, cookie) { return cookie ? { ...headers, 'Set-Cookie': cookie } : headers; }
 function buildSessionCookie(token) { return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${SESSION_TTL_SECONDS}`; }
 function clearSessionCookie() { return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0`; }
-function getCookie(request, name) {
-  const header = request.headers.get('Cookie') || '';
-  for (const part of header.split(';')) {
-    const index = part.indexOf('=');
-    if (index < 0) continue;
-    const key = part.slice(0, index).trim();
-    if (key === name) return decodeURIComponent(part.slice(index + 1).trim());
-  }
-  return null;
-}
+function getCookie(request, name) { const header = request.headers.get('Cookie') || ''; for (const part of header.split(';')) { const index = part.indexOf('='); if (index < 0) continue; const key = part.slice(0, index).trim(); if (key === name) return decodeURIComponent(part.slice(index + 1).trim()); } return null; }
 function jsonResponse(data, status = 200, headers = {}) { return new Response(JSON.stringify(data), { status, headers }); }
 function generateId() { return crypto.randomUUID(); }
 function generateToken() { return crypto.randomUUID() + '-' + crypto.randomUUID(); }
@@ -192,17 +224,6 @@ function bytesToBase64(bytes) { let binary = ''; for (const byte of bytes) binar
 function base64ToBytes(value) { const binary = atob(value); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return bytes; }
 function constantTimeEqual(a, b) { if (a.length !== b.length) return false; let diff = 0; for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]; return diff === 0; }
 async function createSession(kv, token, userId) { const expiresAt = new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(); await kv.put(`session:${token}`, JSON.stringify({ userId, expiresAt, createdAt: new Date().toISOString() }), { expirationTtl: SESSION_TTL_SECONDS }); }
-function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
-function getAuthToken(request) {
-  const cookieToken = getCookie(request, SESSION_COOKIE);
-  if (cookieToken) return cookieToken;
-  const header = request.headers.get('Authorization') || '';
-  if (!header.toLowerCase().startsWith('bearer ')) return null;
-  return header.slice(7).trim() || null;
-}
-async function getTokenOwner(token, kv) {
-  if (!token || !kv) return null;
-  const sessionData = await kv.get(`session:${token}`);
-  if (sessionData) { try { const session = JSON.parse(sessionData); if (!session.userId || !session.expiresAt) return null; if (Date.now() >= Date.parse(session.expiresAt)) { await kv.delete(`session:${token}`); return null; } return session.userId; } catch { await kv.delete(`session:${token}`); return null; } }
-  return await kv.get(`token:${token}`) || null;
-}
+function isValidEmail(email) { return typeof email === 'string' && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+function getAuthToken(request) { const cookieToken = getCookie(request, SESSION_COOKIE); if (cookieToken) return cookieToken; const header = request.headers.get('Authorization') || ''; if (header.toLowerCase().startsWith('bearer ')) return header.slice(7).trim() || null; return null; }
+async function getTokenOwner(token, kv) { if (!token || !kv) return null; const sessionData = await kv.get(`session:${token}`); if (sessionData) { try { const session = JSON.parse(sessionData); if (!session.userId || !session.expiresAt) return null; if (Date.now() >= Date.parse(session.expiresAt)) { await kv.delete(`session:${token}`); return null; } return session.userId; } catch { await kv.delete(`session:${token}`); return null; } } return await kv.get(`token:${token}`) || null; }
