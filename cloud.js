@@ -244,6 +244,12 @@ function toggleForm() { const loginForm = document.getElementById('loginForm'); 
 function showAlert(message, type = 'info') { const alert = document.getElementById('alert'); if (!alert) return console.log(message); alert.className = `alert ${type} show`; alert.textContent = message; setTimeout(() => hideAlert(), 5000); }
 function hideAlert() { const alert = document.getElementById('alert'); if (alert) alert.classList.remove('show'); }
 function setLoading(isLoading, text = 'Loading...') { const loginBtn = document.getElementById('loginBtn'); const registerBtn = document.getElementById('registerBtn'); const loginLoading = document.getElementById('loginLoading'); const registerLoading = document.getElementById('registerLoading'); if (loginBtn) loginBtn.disabled = isLoading; if (registerBtn) registerBtn.disabled = isLoading; if (loginLoading) { loginLoading.style.display = isLoading ? 'block' : 'none'; if (isLoading) loginLoading.innerHTML = `<span class="spinner"></span> ${text}`; } if (registerLoading) { registerLoading.style.display = isLoading ? 'block' : 'none'; if (isLoading) registerLoading.innerHTML = `<span class="spinner"></span> ${text}`; } }
+
+// Navigation from the main app to the dedicated cloud authentication page.
+function goToCloudPage() {
+  window.location.href = './cloud.html';
+}
+
 function goToApp() { window.location.href = './index.html'; }
 async function safeJson(response) { try { return await response.json(); } catch { return {}; } }
 function mergeTransactions(local, cloud, deletedIds = new Set()) { const merged = new Map(); cloud.forEach(t => { if (t?.id && !deletedIds.has(t.id)) merged.set(t.id, t); }); local.forEach(t => { if (t?.id && !deletedIds.has(t.id)) { const old = merged.get(t.id); if (!old || getTimestamp(t) >= getTimestamp(old)) merged.set(t.id, t); } }); return Array.from(merged.values()).sort((a, b) => { const dateDiff = new Date(b.date) - new Date(a.date); return dateDiff || getTimestamp(b) - getTimestamp(a); }); }
