@@ -133,10 +133,20 @@
     sessionStorage.setItem('nexa_active_user_scope', current);
   }
 
+  function injectHomePolish() {
+    if (document.getElementById('nexaHomePolish')) return;
+    const link = document.createElement('link');
+    link.id = 'nexaHomePolish';
+    link.rel = 'stylesheet';
+    link.href = './home-polish.css?v=20260904';
+    document.head.appendChild(link);
+  }
+
   function installRuntimeHardening() {
     installNavigationCompatibility();
     clearStaleCartOnUserChange();
     updateProtectedNavigation();
+    injectHomePolish();
     if (typeof window.updateCloudStatus === 'function') window.updateCloudStatus();
     // index.html loads kasir.js immediately after this file. Load the bridge
     // on the next task so the bridge can safely wrap the already-installed POS.
