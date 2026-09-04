@@ -22,121 +22,73 @@
   const nativeSetItem = Storage.prototype.setItem;
   const nativeRemoveItem = Storage.prototype.removeItem;
 
-  function isLocalStorage(storage) {
-    try { return storage === window.localStorage; } catch (_) { return false; }
-  }
+  function isLocalStorage(storage) { try { return storage === window.localStorage; } catch (_) { return false; } }
+  function currentUserId() { try { return nativeGetItem.call(window.localStorage, 'cloud_userId') || ''; } catch (_) { return ''; } }
+  function scopedTransactionKey() { const userId = currentUserId(); return userId ? USER_PREFIX + userId : OFFLINE_KEY; }
 
-  function currentUserId() {
-    try { return nativeGetItem.call(window.localStorage, 'cloud_userId') || ''; }
-    catch (_) { return ''; }
-  }
-
-  function scopedTransactionKey() {
-    const userId = currentUserId();
-    return userId ? USER_PREFIX + userId : OFFLINE_KEY;
-  }
-
-  // Move the auth token out of persistent localStorage. The server-issued
-  // HttpOnly cookie remains the preferred session mechanism; this migration
-  // keeps compatibility with the existing frontend/admin code while reducing
-  // long-lived token exposure.
   Storage.prototype.getItem = function (key) {
-    if (isLocalStorage(this) && key === LEGACY_KEY) {
-      return nativeGetItem.call(this, scopedTransactionKey());
-    }
-    if (isLocalStorage(this) && key === TOKEN_KEY) {
-      try { return nativeGetItem.call(window.sessionStorage, TOKEN_KEY); } catch (_) { return null; }
-    }
+    if (isLocalStorage(this) && key === LEGACY_KEY) return nativeGetItem.call(this, scopedTransactionKey());
+    if (isLocalStorage(this) && key === TOKEN_KEY) { try { return nativeGetItem.call(window.sessionStorage, TOKEN_KEY); } catch (_) { return null; } }
     return nativeGetItem.call(this, key);
   };
-
   Storage.prototype.setItem = function (key, value) {
-    if (isLocalStorage(this) && key === LEGACY_KEY) {
-      return nativeSetItem.call(this, scopedTransactionKey(), value);
-    }
-    if (isLocalStorage(this) && key === TOKEN_KEY) {
-      try { return nativeSetItem.call(window.sessionStorage, TOKEN_KEY, String(value)); } catch (_) { return; }
-    }
+    if (isLocalStorage(this) && key === LEGACY_KEY) return nativeSetItem.call(this, scopedTransactionKey(), value);
+    if (isLocalStorage(this) && key === TOKEN_KEY) { try { return nativeSetItem.call(window.sessionStorage, TOKEN_KEY, String(value)); } catch (_) { return; } }
     return nativeSetItem.call(this, key, value);
   };
-
   Storage.prototype.removeItem = function (key) {
-    if (isLocalStorage(this) && key === LEGACY_KEY) {
-      return nativeRemoveItem.call(this, scopedTransactionKey());
-    }
-    if (isLocalStorage(this) && key === TOKEN_KEY) {
-      try { nativeRemoveItem.call(window.sessionStorage, TOKEN_KEY); } catch (_) {}
-      try { nativeRemoveItem.call(window.localStorage, TOKEN_KEY); } catch (_) {}
-      return;
-    }
+    if (isLocalStorage(this) && key === LEGACY_KEY) return nativeRemoveItem.call(this, scopedTransactionKey());
+    if (isLocalStorage(this) && key === TOKEN_KEY) { try { nativeRemoveItem.call(window.sessionStorage, TOKEN_KEY); } catch (_) {} try { nativeRemoveItem.call(window.localStorage, TOKEN_KEY); } catch (_) {} return; }
     return nativeRemoveItem.call(this, key);
   };
 
   try {
-    const storage = window.localStorage;
-    const userId = currentUserId();
-    const migrated = nativeGetItem.call(storage, MIGRATION_VERSION);
-
+    const storage = window.localStorage, userId = currentUserId(), migrated = nativeGetItem.call(storage, MIGRATION_VERSION);
     if (userId && !migrated) {
-      const userKey = USER_PREFIX + userId;
-      const scopedData = nativeGetItem.call(storage, userKey);
-      const legacyData = nativeGetItem.call(storage, LEGACY_KEY);
+      const userKey = USER_PREFIX + userId, scopedData = nativeGetItem.call(storage, userKey), legacyData = nativeGetItem.call(storage, LEGACY_KEY);
       if (!scopedData && legacyData) nativeSetItem.call(storage, userKey, legacyData);
-      nativeRemoveItem.call(storage, LEGACY_KEY);
-      nativeSetItem.call(storage, MIGRATION_VERSION, '1');
+      nativeRemoveItem.call(storage, LEGACY_KEY); nativeSetItem.call(storage, MIGRATION_VERSION, '1');
     }
-
     const legacyToken = nativeGetItem.call(storage, TOKEN_KEY);
-    if (legacyToken) {
-      try { nativeSetItem.call(window.sessionStorage, TOKEN_KEY, legacyToken); } catch (_) {}
-      nativeRemoveItem.call(storage, TOKEN_KEY);
-    }
-  } catch (error) {
-    console.warn('Client hardening migration skipped:', error);
-  }
+    if (legacyToken) { try { nativeSetItem.call(window.sessionStorage, TOKEN_KEY, legacyToken); } catch (_) {} nativeRemoveItem.call(storage, TOKEN_KEY); }
+  } catch (error) { console.warn('Client hardening migration skipped:', error); }
 
   function installNavigationCompatibility() {
     const originalSwitchTab = window.switchTab;
     if (typeof originalSwitchTab !== 'function' || window.__NEXA_NAV_HARDENED__) return;
     window.__NEXA_NAV_HARDENED__ = true;
-
     window.switchTab = function (tabName) {
       if (tabName === 'home' || tabName === 'kasir') {
         document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-        const content = document.getElementById(tabName);
-        const button = document.querySelector(`.tab-btn[data-tab="${CSS.escape(tabName)}"]`);
-        if (content) content.classList.add('active');
-        if (button) button.classList.add('active');
+        const content = document.getElementById(tabName), button = document.querySelector(`.tab-btn[data-tab="${CSS.escape(tabName)}"]`);
+        if (content) content.classList.add('active'); if (button) button.classList.add('active');
         if (tabName === 'kasir' && typeof window.renderKasir === 'function') window.renderKasir();
         return;
       }
       return originalSwitchTab.apply(this, arguments);
     };
   }
-
   function clearStaleCartOnUserChange() {
-    const current = currentUserId() || 'offline';
-    const previous = sessionStorage.getItem('nexa_active_user_scope');
+    const current = currentUserId() || 'offline', previous = sessionStorage.getItem('nexa_active_user_scope');
     if (previous && previous !== current) sessionStorage.removeItem('nexa_kasir_cart');
     sessionStorage.setItem('nexa_active_user_scope', current);
   }
-
   function installRuntimeHardening() {
-    installNavigationCompatibility();
-    clearStaleCartOnUserChange();
+    installNavigationCompatibility(); clearStaleCartOnUserChange();
     if (typeof window.updateCloudStatus === 'function') window.updateCloudStatus();
+    // index.html loads kasir.js immediately after this file. Load the bridge
+    // on the next task so the bridge can safely wrap the already-installed POS.
+    setTimeout(() => {
+      if (window.__NEXA_KASIR_CLOUD_BRIDGE__) return;
+      const script = document.createElement('script');
+      script.src = './kasir-cloud.js?v=20260904';
+      script.async = false;
+      document.head.appendChild(script);
+    }, 0);
   }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(installRuntimeHardening, 0), { once: true });
+  else setTimeout(installRuntimeHardening, 0);
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(installRuntimeHardening, 0), { once: true });
-  } else {
-    setTimeout(installRuntimeHardening, 0);
-  }
-
-  window.NEXA_DATA_ISOLATION = Object.freeze({
-    version: 3,
-    getCurrentUserId: currentUserId,
-    getTransactionStorageKey: scopedTransactionKey
-  });
+  window.NEXA_DATA_ISOLATION = Object.freeze({ version: 3, getCurrentUserId: currentUserId, getTransactionStorageKey: scopedTransactionKey });
 })();
