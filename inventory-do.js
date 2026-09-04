@@ -1,9 +1,9 @@
 // ==========================================
 // NEXA - ATOMIC INVENTORY DURABLE OBJECT
 // ==========================================
-// A single Durable Object instance owns one user's inventory. All mutations
-// for that user are serialized by Cloudflare, preventing concurrent checkouts
-// from racing on stock values.
+// One Durable Object instance owns one user's inventory. Durable Object
+// requests for the same user are serialized, so checkout stock checks and
+// decrements cannot race with another checkout for that user.
 
 export class InventoryDO {
   constructor(state, env) {
@@ -15,28 +15,23 @@ export class InventoryDO {
   async ensureLoaded() {
     if (this.ready) return this.ready;
     this.ready = (async () => {
-      const marker = await this.state.storage.get('initialized');
-      if (marker) return;
+      if (await this.state.storage.get('initialized')) return;
       const userId = this.state.id.toString();
       const prefix = `product:${userId}:`;
+      const page = await this.env.PEMBUKUAN_KV.list({ prefix, limit: 5000 });
       const products = [];
-      let cursor;
-      do {
-        const page = await this.env.PEMBUKUAN_KV.list({ prefix, cursor });
-        const values = await Promise.all(page.keys.map(k => this.env.PEMBUKUAN_KV.get(k.name)));
-        values.forEach(raw => {
-          if (!raw) return;
-          try {
-            const p = JSON.parse(raw);
-            if (validProduct(p)) products.push(p);
-          } catch {}
-        });
-        cursor = page.list_complete ? undefined : page.cursor;
-      } while (cursor);
-
-      const batch = products.map(p => this.state.storage.put(`product:${p.id}`, p));
-      batch.push(this.state.storage.put('initialized', true));
-      await Promise.all(batch);
+      const values = await Promise.all(page.keys.map(k => this.env.PEMBUKUAN_KV.get(k.name)));
+      values.forEach(raw => {
+        if (!raw) return;
+        try {
+          const p = JSON.parse(raw);
+          if (validProduct(p)) products.push(p);
+        } catch {}
+      });
+      if (!page.list_complete) throw new Error('Inventory migration exceeds supported KV page size');
+      const writes = products.map(p => this.state.storage.put(`product:${p.id}`, p));
+      writes.push(this.state.storage.put('initialized', true));
+      await Promise.all(writes);
     })();
     return this.ready;
   }
@@ -46,8 +41,7 @@ export class InventoryDO {
     const url = new URL(request.url);
     try {
       if (request.method === 'GET' && url.pathname === '/products') {
-        const products = await this.list();
-        return json({ success: true, products });
+        return json({ success: true, products: await this.list() });
       }
 
       if (request.method === 'PUT' && url.pathname === '/products') {
@@ -76,7 +70,6 @@ export class InventoryDO {
         const items = Array.isArray(body?.items) ? body.items : [];
         if (!items.length || items.length > 100) return json({ error: 'Invalid checkout items' }, 400);
 
-        // Aggregate duplicate product IDs first so each product is decremented once.
         const quantities = new Map();
         for (const item of items) {
           if (typeof item?.productId !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(item.productId)) {
@@ -84,21 +77,22 @@ export class InventoryDO {
           }
           const qty = Number(item.qty);
           if (!Number.isSafeInteger(qty) || qty <= 0) return json({ error: 'Invalid checkout item' }, 400);
-          quantities.set(item.productId, (quantities.get(item.productId) || 0) + qty);
+          const total = (quantities.get(item.productId) || 0) + qty;
+          if (!Number.isSafeInteger(total) || total > 1e9) return json({ error: 'Invalid checkout quantity' }, 400);
+          quantities.set(item.productId, total);
         }
 
+        // IMPORTANT: this entire request executes serially for this user's DO.
+        // Validate every line first. If any line fails, no write occurs.
         const changes = [];
         for (const [id, qty] of quantities) {
           const p = await this.state.storage.get(`product:${id}`);
           if (!validProduct(p)) return json({ error: `Product not found: ${id}` }, 404);
           if (p.stock < qty) return json({ error: `Insufficient stock: ${p.name}` }, 409);
-          p.stock -= qty;
-          p.updatedAt = new Date().toISOString();
-          changes.push({ product: p, productId: id, stock: p.stock });
+          const next = { ...p, stock: p.stock - qty, updatedAt: new Date().toISOString() };
+          changes.push({ product: next, productId: id, stock: next.stock });
         }
 
-        // Durable Object execution is serialized per user. Writes happen only
-        // after every item passes validation, so a failed checkout changes nothing.
         await Promise.all(changes.map(x => this.state.storage.put(`product:${x.productId}`, x.product)));
         return json({ success: true, updated: changes.map(x => ({ productId: x.productId, stock: x.stock })) });
       }
@@ -112,12 +106,8 @@ export class InventoryDO {
 
   async list() {
     const out = [];
-    let cursor;
-    do {
-      const page = await this.state.storage.list({ prefix: 'product:', cursor });
-      for (const value of page.values()) if (validProduct(value)) out.push(value);
-      cursor = page.list_complete ? undefined : page.cursor;
-    } while (cursor);
+    const page = await this.state.storage.list({ prefix: 'product:' });
+    for (const value of page.values()) if (validProduct(value)) out.push(value);
     return out.sort((a, b) => String(a.name).localeCompare(String(b.name), 'id'));
   }
 }
