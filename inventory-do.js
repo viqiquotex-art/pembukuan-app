@@ -12,13 +12,30 @@ export class InventoryDO {
     this.ready = null;
   }
 
-  async ensureLoaded() {
+  async ensureLoaded(request) {
     if (this.ready) return this.ready;
     this.ready = (async () => {
-      if (await this.state.storage.get('initialized')) return;
-      const userId = this.state.id.toString();
-      const prefix = `product:${userId}:`;
+      const requestedUserId = request?.headers?.get('X-Inventory-User') || '';
+      if (!/^[A-Za-z0-9_-]{1,100}$/.test(requestedUserId)) {
+        throw new Error('Missing or invalid inventory user ID');
+      }
+
+      const storedUserId = await this.state.storage.get('userId');
+      if (storedUserId && storedUserId !== requestedUserId) {
+        throw new Error('Inventory user mismatch');
+      }
+
+      if (await this.state.storage.get('initialized')) {
+        if (!storedUserId) await this.state.storage.put('userId', requestedUserId);
+        return;
+      }
+
+      // Migrate legacy KV products exactly once. The router maps one DO to
+      // one application user and forwards that user ID in a trusted header.
+      const prefix = `product:${requestedUserId}:`;
       const page = await this.env.PEMBUKUAN_KV.list({ prefix, limit: 5000 });
+      if (!page.list_complete) throw new Error('Inventory migration exceeds supported KV page size');
+
       const products = [];
       const values = await Promise.all(page.keys.map(k => this.env.PEMBUKUAN_KV.get(k.name)));
       values.forEach(raw => {
@@ -28,16 +45,24 @@ export class InventoryDO {
           if (validProduct(p)) products.push(p);
         } catch {}
       });
-      if (!page.list_complete) throw new Error('Inventory migration exceeds supported KV page size');
-      const writes = products.map(p => this.state.storage.put(`product:${p.id}`, p));
-      writes.push(this.state.storage.put('initialized', true));
-      await Promise.all(writes);
+
+      await this.state.storage.transaction(async txn => {
+        for (const p of products) await txn.put(`product:${p.id}`, p);
+        await txn.put('userId', requestedUserId);
+        await txn.put('initialized', true);
+      });
     })();
     return this.ready;
   }
 
   async fetch(request) {
-    await this.ensureLoaded();
+    try {
+      await this.ensureLoaded(request);
+    } catch (error) {
+      console.error('Inventory initialization failed', error);
+      return json({ error: 'Inventory initialization failed' }, 500);
+    }
+
     const url = new URL(request.url);
     try {
       if (request.method === 'GET' && url.pathname === '/products') {
@@ -82,19 +107,28 @@ export class InventoryDO {
           quantities.set(item.productId, total);
         }
 
-        // IMPORTANT: this entire request executes serially for this user's DO.
-        // Validate every line first. If any line fails, no write occurs.
-        const changes = [];
-        for (const [id, qty] of quantities) {
-          const p = await this.state.storage.get(`product:${id}`);
-          if (!validProduct(p)) return json({ error: `Product not found: ${id}` }, 404);
-          if (p.stock < qty) return json({ error: `Insufficient stock: ${p.name}` }, 409);
-          const next = { ...p, stock: p.stock - qty, updatedAt: new Date().toISOString() };
-          changes.push({ product: next, productId: id, stock: next.stock });
+        // Use a storage transaction as well as the DO's request serialization.
+        // Validation and all stock writes therefore commit or roll back together.
+        let updated;
+        try {
+          updated = await this.state.storage.transaction(async txn => {
+            const changes = [];
+            for (const [id, qty] of quantities) {
+              const p = await txn.get(`product:${id}`);
+              if (!validProduct(p)) throw new InventoryError(`Product not found: ${id}`, 404);
+              if (p.stock < qty) throw new InventoryError(`Insufficient stock: ${p.name}`, 409);
+              const next = { ...p, stock: p.stock - qty, updatedAt: new Date().toISOString() };
+              changes.push({ productId: id, product: next, stock: next.stock });
+            }
+            for (const change of changes) await txn.put(`product:${change.productId}`, change.product);
+            return changes.map(({ productId, stock }) => ({ productId, stock }));
+          });
+        } catch (error) {
+          if (error instanceof InventoryError) return json({ error: error.message }, error.status);
+          throw error;
         }
 
-        await Promise.all(changes.map(x => this.state.storage.put(`product:${x.productId}`, x.product)));
-        return json({ success: true, updated: changes.map(x => ({ productId: x.productId, stock: x.stock })) });
+        return json({ success: true, updated });
       }
 
       return json({ error: 'Not found' }, 404);
@@ -109,6 +143,14 @@ export class InventoryDO {
     const page = await this.state.storage.list({ prefix: 'product:' });
     for (const value of page.values()) if (validProduct(value)) out.push(value);
     return out.sort((a, b) => String(a.name).localeCompare(String(b.name), 'id'));
+  }
+}
+
+class InventoryError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = 'InventoryError';
+    this.status = status;
   }
 }
 
