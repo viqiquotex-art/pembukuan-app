@@ -5,10 +5,9 @@
 // routed to one Durable Object per user so concurrent checkouts are serialized.
 
 import legacyWorker from './worker.js';
+export { InventoryDO } from './inventory-do.js';
 
 const SESSION_COOKIE = 'session';
-const PRODUCT_PREFIX = 'product:';
-const MAX_PRODUCTS = 5000;
 
 export default {
   async fetch(request, env, ctx) {
@@ -29,11 +28,9 @@ export default {
     const stub = env.INVENTORY.get(id);
     const target = new URL(url);
     target.pathname = url.pathname.replace(/^\/api/, '');
-    const headers = new Headers(request.headers);
-    headers.set('X-Inventory-User', userId);
     const forwarded = new Request(target.toString(), {
       method: request.method,
-      headers,
+      headers: request.headers,
       body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
     });
     const response = await stub.fetch(forwarded);
