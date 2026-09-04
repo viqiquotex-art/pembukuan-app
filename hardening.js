@@ -1,43 +1,34 @@
 // ==========================================
-// NEXA - CLIENT DATA ISOLATION
+// NEXA - CLIENT DATA + SECURITY HARDENING
 // ==========================================
-// User-scoped local transaction storage.
-// Authenticated: transactions:user:<userId>
-// Offline:       transactions:offline
-//
-// Only the legacy "transactions" key is remapped. Other localStorage
-// keys remain untouched.
+// User-scoped local transaction storage plus runtime compatibility fixes.
+// Authentication still uses the Worker's HttpOnly session cookie as the
+// preferred transport. Any legacy cloud token is migrated out of persistent
+// localStorage into sessionStorage for the lifetime of the browser tab.
 
 (function () {
   'use strict';
 
-  // Prevent duplicate interception if this script is accidentally loaded twice.
   if (window.__NEXA_DATA_ISOLATION_INSTALLED__) return;
   window.__NEXA_DATA_ISOLATION_INSTALLED__ = true;
 
   const LEGACY_KEY = 'transactions';
   const OFFLINE_KEY = 'transactions:offline';
   const USER_PREFIX = 'transactions:user:';
-  const MIGRATION_VERSION = 'transactions_user_scope_migrated_v2';
+  const MIGRATION_VERSION = 'transactions_user_scope_migrated_v3';
+  const TOKEN_KEY = 'cloud_token';
 
   const nativeGetItem = Storage.prototype.getItem;
   const nativeSetItem = Storage.prototype.setItem;
   const nativeRemoveItem = Storage.prototype.removeItem;
 
   function isLocalStorage(storage) {
-    try {
-      return storage === window.localStorage;
-    } catch (_) {
-      return false;
-    }
+    try { return storage === window.localStorage; } catch (_) { return false; }
   }
 
   function currentUserId() {
-    try {
-      return nativeGetItem.call(window.localStorage, 'cloud_userId') || '';
-    } catch (_) {
-      return '';
-    }
+    try { return nativeGetItem.call(window.localStorage, 'cloud_userId') || ''; }
+    catch (_) { return ''; }
   }
 
   function scopedTransactionKey() {
@@ -45,9 +36,16 @@
     return userId ? USER_PREFIX + userId : OFFLINE_KEY;
   }
 
+  // Move the auth token out of persistent localStorage. The server-issued
+  // HttpOnly cookie remains the preferred session mechanism; this migration
+  // keeps compatibility with the existing frontend/admin code while reducing
+  // long-lived token exposure.
   Storage.prototype.getItem = function (key) {
     if (isLocalStorage(this) && key === LEGACY_KEY) {
       return nativeGetItem.call(this, scopedTransactionKey());
+    }
+    if (isLocalStorage(this) && key === TOKEN_KEY) {
+      try { return nativeGetItem.call(window.sessionStorage, TOKEN_KEY); } catch (_) { return null; }
     }
     return nativeGetItem.call(this, key);
   };
@@ -56,6 +54,9 @@
     if (isLocalStorage(this) && key === LEGACY_KEY) {
       return nativeSetItem.call(this, scopedTransactionKey(), value);
     }
+    if (isLocalStorage(this) && key === TOKEN_KEY) {
+      try { return nativeSetItem.call(window.sessionStorage, TOKEN_KEY, String(value)); } catch (_) { return; }
+    }
     return nativeSetItem.call(this, key, value);
   };
 
@@ -63,11 +64,14 @@
     if (isLocalStorage(this) && key === LEGACY_KEY) {
       return nativeRemoveItem.call(this, scopedTransactionKey());
     }
+    if (isLocalStorage(this) && key === TOKEN_KEY) {
+      try { nativeRemoveItem.call(window.sessionStorage, TOKEN_KEY); } catch (_) {}
+      try { nativeRemoveItem.call(window.localStorage, TOKEN_KEY); } catch (_) {}
+      return;
+    }
     return nativeRemoveItem.call(this, key);
   };
 
-  // Migrate a pre-isolation global transaction bucket once. Prefer an existing
-  // scoped bucket so an already-isolated user's data can never be overwritten.
   try {
     const storage = window.localStorage;
     const userId = currentUserId();
@@ -77,22 +81,61 @@
       const userKey = USER_PREFIX + userId;
       const scopedData = nativeGetItem.call(storage, userKey);
       const legacyData = nativeGetItem.call(storage, LEGACY_KEY);
-
-      if (!scopedData && legacyData) {
-        nativeSetItem.call(storage, userKey, legacyData);
-      }
-
-      // Remove the legacy global bucket after migration. It must never remain
-      // available for accidental cross-user reads.
+      if (!scopedData && legacyData) nativeSetItem.call(storage, userKey, legacyData);
       nativeRemoveItem.call(storage, LEGACY_KEY);
       nativeSetItem.call(storage, MIGRATION_VERSION, '1');
     }
+
+    const legacyToken = nativeGetItem.call(storage, TOKEN_KEY);
+    if (legacyToken) {
+      try { nativeSetItem.call(window.sessionStorage, TOKEN_KEY, legacyToken); } catch (_) {}
+      nativeRemoveItem.call(storage, TOKEN_KEY);
+    }
   } catch (error) {
-    console.warn('Transaction storage migration skipped:', error);
+    console.warn('Client hardening migration skipped:', error);
+  }
+
+  function installNavigationCompatibility() {
+    const originalSwitchTab = window.switchTab;
+    if (typeof originalSwitchTab !== 'function' || window.__NEXA_NAV_HARDENED__) return;
+    window.__NEXA_NAV_HARDENED__ = true;
+
+    window.switchTab = function (tabName) {
+      if (tabName === 'home' || tabName === 'kasir') {
+        document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        const content = document.getElementById(tabName);
+        const button = document.querySelector(`.tab-btn[data-tab="${CSS.escape(tabName)}"]`);
+        if (content) content.classList.add('active');
+        if (button) button.classList.add('active');
+        if (tabName === 'kasir' && typeof window.renderKasir === 'function') window.renderKasir();
+        return;
+      }
+      return originalSwitchTab.apply(this, arguments);
+    };
+  }
+
+  function clearStaleCartOnUserChange() {
+    const current = currentUserId() || 'offline';
+    const previous = sessionStorage.getItem('nexa_active_user_scope');
+    if (previous && previous !== current) sessionStorage.removeItem('nexa_kasir_cart');
+    sessionStorage.setItem('nexa_active_user_scope', current);
+  }
+
+  function installRuntimeHardening() {
+    installNavigationCompatibility();
+    clearStaleCartOnUserChange();
+    if (typeof window.updateCloudStatus === 'function') window.updateCloudStatus();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(installRuntimeHardening, 0), { once: true });
+  } else {
+    setTimeout(installRuntimeHardening, 0);
   }
 
   window.NEXA_DATA_ISOLATION = Object.freeze({
-    version: 2,
+    version: 3,
     getCurrentUserId: currentUserId,
     getTransactionStorageKey: scopedTransactionKey
   });
