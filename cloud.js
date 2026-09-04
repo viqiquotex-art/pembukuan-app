@@ -1,5 +1,5 @@
 // ==========================================
-// PEMBUKUAN CLOUD - TOKEN + COOKIE SESSION
+// PEMBUKUAN CLOUD - SESSION + COOKIE AUTH
 // ==========================================
 
 const API_BASE_URL = 'https://pembukuan-app.viqiquotex.workers.dev';
@@ -14,12 +14,28 @@ const API_ENDPOINTS = {
   export: userId => `${API_BASE_URL}/api/export/${encodeURIComponent(userId)}`
 };
 const SYNC_SNAPSHOT_KEY = 'cloud_sync_snapshot';
+const CLOUD_TOKEN_KEY = 'cloud_token';
 
+function getCloudToken() {
+  try {
+    return sessionStorage.getItem(CLOUD_TOKEN_KEY) || localStorage.getItem(CLOUD_TOKEN_KEY) || '';
+  } catch { return ''; }
+}
+function setCloudToken(token) {
+  try {
+    if (token) sessionStorage.setItem(CLOUD_TOKEN_KEY, token);
+    localStorage.removeItem(CLOUD_TOKEN_KEY);
+  } catch {}
+}
+function clearCloudToken() {
+  try { sessionStorage.removeItem(CLOUD_TOKEN_KEY); } catch {}
+  try { localStorage.removeItem(CLOUD_TOKEN_KEY); } catch {}
+}
 function getCloudCredentials() {
   const userId = localStorage.getItem('cloud_userId');
   const email = localStorage.getItem('cloud_email');
   const name = localStorage.getItem('cloud_name');
-  const token = localStorage.getItem('cloud_token');
+  const token = getCloudToken();
   return userId ? { userId, email, name, token } : null;
 }
 function saveCloudCredentials(credentials) {
@@ -27,20 +43,20 @@ function saveCloudCredentials(credentials) {
   localStorage.setItem('cloud_userId', credentials.userId);
   localStorage.setItem('cloud_email', credentials.email || '');
   localStorage.setItem('cloud_name', credentials.name || '');
-  if (credentials.token) localStorage.setItem('cloud_token', credentials.token);
+  setCloudToken(credentials.token || '');
   localStorage.removeItem('cloud_credentials');
 }
 function clearCloudCredentials() {
   localStorage.removeItem('cloud_credentials');
-  localStorage.removeItem('cloud_token');
+  clearCloudToken();
   localStorage.removeItem('cloud_userId');
   localStorage.removeItem('cloud_email');
   localStorage.removeItem('cloud_name');
   localStorage.removeItem(SYNC_SNAPSHOT_KEY);
 }
-function isCloudConnected() { return !!localStorage.getItem('cloud_userId') && !!localStorage.getItem('cloud_token'); }
+function isCloudConnected() { return !!localStorage.getItem('cloud_userId') && !!getCloudToken(); }
 function authFetch(url, options = {}) {
-  const token = localStorage.getItem('cloud_token');
+  const token = getCloudToken();
   const headers = new Headers(options.headers || {});
   if (token) headers.set('Authorization', `Bearer ${token}`);
   return fetch(url, { ...options, headers, credentials: 'include' });
@@ -93,26 +109,12 @@ async function syncToCloud() {
       if (Array.isArray(data.deletedIds)) data.deletedIds.forEach(id => deletedIds.add(id));
       saveLocalDeletedTransactionIds(deletedIds);
       const serverTransactions = Array.isArray(data.transactions) ? data.transactions : [];
-      // The Worker has already resolved timestamp conflicts. Its response is
-      // therefore authoritative for records returned by the server. Local-only
-      // records that were not part of the response are preserved only if they
-      // were created after the request snapshot.
       const sentIds = new Set(transactions.map(t => t.id));
       const serverById = new Map(serverTransactions.filter(t => t?.id && !deletedIds.has(t.id)).map(t => [t.id, t]));
       const merged = new Map();
       serverById.forEach((t, id) => merged.set(id, t));
-      localBefore.forEach(t => {
-        if (!t?.id || deletedIds.has(t.id)) return;
-        if (serverById.has(t.id)) return;
-        // If this record was sent but the server omitted it, it lost a conflict
-        // (or was deleted). Do not resurrect it. Unsynced local-only records are safe.
-        if (sentIds.has(t.id)) return;
-        merged.set(t.id, t);
-      });
-      const finalTransactions = Array.from(merged.values()).sort((a, b) => {
-        const dateDiff = new Date(b.date) - new Date(a.date);
-        return dateDiff || getTimestamp(b) - getTimestamp(a);
-      });
+      localBefore.forEach(t => { if (!t?.id || deletedIds.has(t.id)) return; if (serverById.has(t.id)) return; if (sentIds.has(t.id)) return; merged.set(t.id, t); });
+      const finalTransactions = Array.from(merged.values()).sort((a, b) => { const dateDiff = new Date(b.date) - new Date(a.date); return dateDiff || getTimestamp(b) - getTimestamp(a); });
       localStorage.setItem('transactions', JSON.stringify(finalTransactions));
       writeSyncSnapshot(credentials.userId, serverTransactions);
       if (typeof renderHistory === 'function') renderHistory();
@@ -120,11 +122,8 @@ async function syncToCloud() {
       showAlert(`✅ Sync selesai! ${finalTransactions.length} transaksi (${transactions.length} perubahan dikirim)`, 'success');
       loadStats();
       return true;
-    } catch (error) {
-      console.error('Sync error:', error);
-      showAlert(`❌ Sync gagal: ${error.message}`, 'error');
-      return false;
-    } finally { setLoading(false); cloudSyncInFlight = null; }
+    } catch (error) { console.error('Sync error:', error); showAlert(`❌ Sync gagal: ${error.message}`, 'error'); return false; }
+    finally { setLoading(false); cloudSyncInFlight = null; }
   })();
   return cloudSyncInFlight;
 }
@@ -145,8 +144,6 @@ async function loadFromCloud() {
     saveLocalDeletedTransactionIds(localDeletedIds);
     const local = parseLocalTransactions().filter(t => t?.id && !localDeletedIds.has(t.id));
     const cloud = cloudTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
-    // Load is intentionally a merge, not a blind replace: unsynced local
-    // changes are retained when their timestamps are newer than cloud data.
     const merged = mergeTransactions(local, cloud, localDeletedIds);
     localStorage.setItem('transactions', JSON.stringify(merged));
     writeSyncSnapshot(credentials.userId, cloudTransactions);
