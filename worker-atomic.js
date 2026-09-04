@@ -1,7 +1,7 @@
 // ==========================================
 // PEMBUKUAN API - ATOMIC INVENTORY ROUTER
 // ==========================================
-// Non-inventory routes continue to use worker.js. Inventory mutations are
+// Non-inventory routes continue to use worker.js. Inventory requests are
 // routed to one Durable Object per user so concurrent checkouts are serialized.
 
 import legacyWorker from './worker.js';
@@ -28,9 +28,12 @@ export default {
     const stub = env.INVENTORY.get(id);
     const target = new URL(url);
     target.pathname = url.pathname.replace(/^\/api/, '');
+    const headers = new Headers(request.headers);
+    // The DO uses this stable application-level ID for one-time KV migration.
+    headers.set('X-Inventory-User', userId);
     const forwarded = new Request(target.toString(), {
       method: request.method,
-      headers: request.headers,
+      headers,
       body: request.method === 'GET' || request.method === 'HEAD' ? undefined : request.body,
     });
     const response = await stub.fetch(forwarded);
