@@ -17,15 +17,11 @@ const SYNC_SNAPSHOT_KEY = 'cloud_sync_snapshot';
 const CLOUD_TOKEN_KEY = 'cloud_token';
 
 function getCloudToken() {
-  try {
-    return sessionStorage.getItem(CLOUD_TOKEN_KEY) || localStorage.getItem(CLOUD_TOKEN_KEY) || '';
-  } catch { return ''; }
+  try { return sessionStorage.getItem(CLOUD_TOKEN_KEY) || localStorage.getItem(CLOUD_TOKEN_KEY) || ''; }
+  catch { return ''; }
 }
 function setCloudToken(token) {
-  try {
-    if (token) sessionStorage.setItem(CLOUD_TOKEN_KEY, token);
-    localStorage.removeItem(CLOUD_TOKEN_KEY);
-  } catch {}
+  try { if (token) sessionStorage.setItem(CLOUD_TOKEN_KEY, token); localStorage.removeItem(CLOUD_TOKEN_KEY); } catch {}
 }
 function clearCloudToken() {
   try { sessionStorage.removeItem(CLOUD_TOKEN_KEY); } catch {}
@@ -54,7 +50,9 @@ function clearCloudCredentials() {
   localStorage.removeItem('cloud_name');
   localStorage.removeItem(SYNC_SNAPSHOT_KEY);
 }
-function isCloudConnected() { return !!localStorage.getItem('cloud_userId') && !!getCloudToken(); }
+// The server's HttpOnly cookie is the primary session. The token is optional
+// compatibility state for the current tab and is never persisted long-term.
+function isCloudConnected() { return !!localStorage.getItem('cloud_userId'); }
 function authFetch(url, options = {}) {
   const token = getCloudToken();
   const headers = new Headers(options.headers || {});
@@ -92,7 +90,7 @@ let cloudSyncInFlight = null;
 async function syncToCloud() {
   if (!isCloudConnected()) return showAlert('❌ Anda harus login terlebih dahulu', 'error');
   const credentials = getCloudCredentials();
-  if (!credentials?.token) return showAlert('❌ Sesi cloud tidak valid. Silakan login kembali.', 'error');
+  if (!credentials?.userId) return showAlert('❌ Identitas cloud tidak valid. Silakan login kembali.', 'error');
   if (cloudSyncInFlight) return cloudSyncInFlight;
   cloudSyncInFlight = (async () => {
     try {
@@ -111,52 +109,30 @@ async function syncToCloud() {
       const serverTransactions = Array.isArray(data.transactions) ? data.transactions : [];
       const sentIds = new Set(transactions.map(t => t.id));
       const serverById = new Map(serverTransactions.filter(t => t?.id && !deletedIds.has(t.id)).map(t => [t.id, t]));
-      const merged = new Map();
-      serverById.forEach((t, id) => merged.set(id, t));
+      const merged = new Map(); serverById.forEach((t, id) => merged.set(id, t));
       localBefore.forEach(t => { if (!t?.id || deletedIds.has(t.id)) return; if (serverById.has(t.id)) return; if (sentIds.has(t.id)) return; merged.set(t.id, t); });
       const finalTransactions = Array.from(merged.values()).sort((a, b) => { const dateDiff = new Date(b.date) - new Date(a.date); return dateDiff || getTimestamp(b) - getTimestamp(a); });
       localStorage.setItem('transactions', JSON.stringify(finalTransactions));
       writeSyncSnapshot(credentials.userId, serverTransactions);
-      if (typeof renderHistory === 'function') renderHistory();
-      if (typeof renderRecap === 'function') renderRecap();
-      showAlert(`✅ Sync selesai! ${finalTransactions.length} transaksi (${transactions.length} perubahan dikirim)`, 'success');
-      loadStats();
-      return true;
+      if (typeof renderHistory === 'function') renderHistory(); if (typeof renderRecap === 'function') renderRecap();
+      showAlert(`✅ Sync selesai! ${finalTransactions.length} transaksi (${transactions.length} perubahan dikirim)`, 'success'); loadStats(); return true;
     } catch (error) { console.error('Sync error:', error); showAlert(`❌ Sync gagal: ${error.message}`, 'error'); return false; }
     finally { setLoading(false); cloudSyncInFlight = null; }
-  })();
-  return cloudSyncInFlight;
+  })(); return cloudSyncInFlight;
 }
 async function loadFromCloud() {
   if (!isCloudConnected()) return showAlert('❌ Anda harus login terlebih dahulu', 'error');
-  const credentials = getCloudCredentials();
+  const credentials = getCloudCredentials(); if (!credentials?.userId) return showAlert('❌ Identitas cloud tidak valid. Silakan login kembali.', 'error');
   try {
-    setLoading(true, 'Memuat dari cloud...');
-    const response = await authFetch(API_ENDPOINTS.getTransactions(credentials.userId), { method: 'GET' });
-    const data = await safeJson(response);
-    if (response.status === 401) { handleAuthFailure(data.error); return false; }
-    if (response.status === 403) { showAlert('❌ Akses cloud ditolak.', 'error'); return false; }
-    if (!response.ok) { showAlert(`❌ ${data.error || 'Load gagal'}`, 'error'); return false; }
-    const cloudTransactions = Array.isArray(data.transactions) ? data.transactions : [];
-    const cloudDeletedIds = Array.isArray(data.deletedIds) ? data.deletedIds.filter(Boolean) : [];
-    const localDeletedIds = getLocalDeletedTransactionIds();
-    cloudDeletedIds.forEach(id => localDeletedIds.add(id));
-    saveLocalDeletedTransactionIds(localDeletedIds);
-    const local = parseLocalTransactions().filter(t => t?.id && !localDeletedIds.has(t.id));
-    const cloud = cloudTransactions.filter(t => t?.id && !localDeletedIds.has(t.id));
-    const merged = mergeTransactions(local, cloud, localDeletedIds);
-    localStorage.setItem('transactions', JSON.stringify(merged));
-    writeSyncSnapshot(credentials.userId, cloudTransactions);
-    if (typeof renderHistory === 'function') renderHistory();
-    if (typeof renderRecap === 'function') renderRecap();
-    showAlert(`✅ Loaded! ${merged.length} transaksi`, 'success');
-    loadStats();
-    return true;
-  } catch (error) { console.error('Load error:', error); showAlert(`❌ Load gagal: ${error.message}`, 'error'); return false; }
-  finally { setLoading(false); }
+    setLoading(true, 'Memuat dari cloud...'); const response = await authFetch(API_ENDPOINTS.getTransactions(credentials.userId), { method: 'GET' }); const data = await safeJson(response);
+    if (response.status === 401) { handleAuthFailure(data.error); return false; } if (response.status === 403) { showAlert('❌ Akses cloud ditolak.', 'error'); return false; } if (!response.ok) { showAlert(`❌ ${data.error || 'Load gagal'}`, 'error'); return false; }
+    const cloudTransactions = Array.isArray(data.transactions) ? data.transactions : []; const cloudDeletedIds = Array.isArray(data.deletedIds) ? data.deletedIds.filter(Boolean) : []; const localDeletedIds = getLocalDeletedTransactionIds(); cloudDeletedIds.forEach(id => localDeletedIds.add(id)); saveLocalDeletedTransactionIds(localDeletedIds);
+    const local = parseLocalTransactions().filter(t => t?.id && !localDeletedIds.has(t.id)); const cloud = cloudTransactions.filter(t => t?.id && !localDeletedIds.has(t.id)); const merged = mergeTransactions(local, cloud, localDeletedIds);
+    localStorage.setItem('transactions', JSON.stringify(merged)); writeSyncSnapshot(credentials.userId, cloudTransactions); if (typeof renderHistory === 'function') renderHistory(); if (typeof renderRecap === 'function') renderRecap(); showAlert(`✅ Loaded! ${merged.length} transaksi`, 'success'); loadStats(); return true;
+  } catch (error) { console.error('Load error:', error); showAlert(`❌ Load gagal: ${error.message}`, 'error'); return false; } finally { setLoading(false); }
 }
 async function loadStats() { const credentials = getCloudCredentials(); if (!isCloudConnected() || !credentials) return; try { const response = await authFetch(API_ENDPOINTS.getStats(credentials.userId)); const data = await safeJson(response); if (response.status === 401) return handleAuthFailure(data.error); if (!response.ok) return; const stats = data.stats || data; const userName = document.getElementById('userName'); if (userName) userName.textContent = credentials.name || ''; const container = document.getElementById('statsContainer'); if (!container) return; const values = [['💰 Total Pemasukan', formatRupiah(stats.totalIncome)], ['💸 Total Pengeluaran', formatRupiah(stats.totalExpense)], ['📊 Saldo', formatRupiah(stats.balance)], ['📝 Transaksi', Number(stats.transactionCount) || 0]]; const fragment = document.createDocumentFragment(); values.forEach(([label, value]) => { const card = document.createElement('div'); card.className = 'stat-card'; const labelEl = document.createElement('div'); labelEl.className = 'label'; labelEl.textContent = label; const valueEl = document.createElement('div'); valueEl.className = 'value'; valueEl.textContent = value; card.append(labelEl, valueEl); fragment.appendChild(card); }); container.replaceChildren(fragment); } catch (error) { console.error('Failed to load stats:', error); } }
-async function validateCloudSession() { const credentials = getCloudCredentials(); if (!credentials || !credentials.token) return false; try { const response = await authFetch(API_ENDPOINTS.profile); const data = await safeJson(response); if (response.status === 401) { handleAuthFailure(data.error); return false; } if (!response.ok || !data.userId) return false; saveCloudCredentials({ userId: data.userId, name: data.name, email: data.email, token: credentials.token }); return true; } catch { return false; } }
+async function validateCloudSession() { const credentials = getCloudCredentials(); if (!credentials?.userId) return false; try { const response = await authFetch(API_ENDPOINTS.profile); const data = await safeJson(response); if (response.status === 401) { handleAuthFailure(data.error); return false; } if (!response.ok || !data.userId) return false; saveCloudCredentials({ userId: data.userId, name: data.name, email: data.email, token: credentials.token || '' }); return true; } catch { return false; } }
 function toggleForm() { const loginForm = document.getElementById('loginForm'); const registerForm = document.getElementById('registerForm'); if (!loginForm || !registerForm) return; const showRegister = loginForm.style.display !== 'none'; loginForm.style.display = showRegister ? 'none' : 'block'; registerForm.style.display = showRegister ? 'block' : 'none'; hideAlert(); }
 function showAlert(message, type = 'info') { const alert = document.getElementById('alert'); if (!alert) return console.log(message); alert.className = `alert ${type} show`; alert.textContent = message; setTimeout(() => hideAlert(), 5000); }
 function hideAlert() { const alert = document.getElementById('alert'); if (alert) alert.classList.remove('show'); }
