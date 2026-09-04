@@ -1,382 +1,69 @@
 // ==========================================
 // PEMBUKUAN API - Cloudflare Worker
-// Authentication, Authorization, Transactions & Admin Audit
+// Authentication, Authorization, Transactions, Admin & Inventory
 // ==========================================
+const SESSION_TTL_SECONDS=604800,PASSWORD_ITERATIONS=100000,LEGACY_PASSWORD_SUFFIX=':pembukuan-salt-2026',LOGIN_MAX_ATTEMPTS=5,LOGIN_WINDOW_SECONDS=900,REGISTER_MAX_ATTEMPTS=5,REGISTER_WINDOW_SECONDS=3600,RATE_LIMIT_PREFIX='rate:',SESSION_COOKIE='session',MAX_TRANSACTIONS_PER_SYNC=1000,MAX_TRANSACTION_ID_LENGTH=100,MAX_CATEGORY_LENGTH=80,MAX_DESCRIPTION_LENGTH=500,MAX_TRANSACTION_AMOUNT=1e15,MAX_USER_ID_LENGTH=100,TX_PREFIX='tx:',DELETED_PREFIX='deleted:',LEGACY_TRANSACTIONS_PREFIX='transactions:',AUDIT_PREFIX='audit:',AUDIT_RETENTION_SECONDS=15552000,MAX_AUDIT_PAGE_SIZE=100,MAX_CLIENT_FUTURE_SKEW_MS=300000,PRODUCT_PREFIX='product:',MAX_PRODUCTS=5000,MAX_PRODUCT_NAME_LENGTH=100,MAX_PRODUCT_PRICE=1e15,MAX_PRODUCT_STOCK=1e9;
 
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
-const PASSWORD_ITERATIONS = 100000;
-const LEGACY_PASSWORD_SUFFIX = ':pembukuan-salt-2026';
-const LOGIN_MAX_ATTEMPTS = 5;
-const LOGIN_WINDOW_SECONDS = 60 * 15;
-const REGISTER_MAX_ATTEMPTS = 5;
-const REGISTER_WINDOW_SECONDS = 60 * 60;
-const RATE_LIMIT_PREFIX = 'rate:';
-const SESSION_COOKIE = 'session';
-const MAX_TRANSACTIONS_PER_SYNC = 1000;
-const MAX_TRANSACTION_ID_LENGTH = 100;
-const MAX_CATEGORY_LENGTH = 80;
-const MAX_DESCRIPTION_LENGTH = 500;
-const MAX_TRANSACTION_AMOUNT = 1_000_000_000_000_000;
-const MAX_USER_ID_LENGTH = 100;
-const TX_PREFIX = 'tx:';
-const DELETED_PREFIX = 'deleted:';
-const LEGACY_TRANSACTIONS_PREFIX = 'transactions:';
-const AUDIT_PREFIX = 'audit:';
-const AUDIT_RETENTION_SECONDS = 60 * 60 * 24 * 180;
-const MAX_AUDIT_PAGE_SIZE = 100;
-const MAX_CLIENT_FUTURE_SKEW_MS = 5 * 60 * 1000;
+export default {async fetch(request,env){const cors=getCorsHeaders(request,env);if(request.method==='OPTIONS')return new Response(null,{status:204,headers:cors});if(!isAllowedStateChangingOrigin(request,env))return jsonResponse({error:'Forbidden origin'},403,cors);const {pathname:path}=new URL(request.url),method=request.method;try{
+if(path==='/api/health'&&method==='GET')return jsonResponse({status:'ok',message:'Pembukuan API is running ⚡',timestamp:new Date().toISOString()},200,cors);
+if(path==='/api/auth/register'&&method==='POST')return await handleRegister(request,env,cors);
+if(path==='/api/auth/login'&&method==='POST')return await handleLogin(request,env,cors);
+if(path==='/api/auth/logout'&&method==='POST')return await handleLogout(request,env,cors);
+if(path==='/api/auth/profile'&&method==='GET')return await handleGetProfile(request,env,cors);
+if(path==='/api/admin/config-status'&&method==='GET')return await handleAdminConfigStatus(request,env,cors);
+if(path==='/api/admin/users'&&method==='GET')return await handleGetUsers(request,env,cors);
+if(path==='/api/admin/overview'&&method==='GET')return await handleAdminOverview(request,env,cors);
+if(path==='/api/admin/audit'&&method==='GET')return await handleAdminAudit(request,env,cors);
+if(path==='/api/transactions'&&method==='POST')return await handleSaveTransactions(request,env,cors);
+if(/^\/api\/transactions\/[^/]+$/.test(path)&&method==='GET')return await handleGetTransactions(decodeURIComponent(path.split('/')[3]),request,env,cors);
+if(/^\/api\/transactions\/[^/]+\/[^/]+$/.test(path)&&method==='DELETE'){const p=path.split('/');return await handleDeleteTransaction(decodeURIComponent(p[3]),decodeURIComponent(p[4]),request,env,cors)}
+if(/^\/api\/stats\/[^/]+$/.test(path)&&method==='GET')return await handleGetStats(decodeURIComponent(path.split('/')[3]),request,env,cors);
+if(/^\/api\/export\/[^/]+$/.test(path)&&method==='GET')return await handleExport(decodeURIComponent(path.split('/')[3]),request,env,cors);
+if(path==='/api/products'&&method==='GET')return await handleGetProducts(request,env,cors);
+if(path==='/api/products'&&method==='PUT')return await handlePutProducts(request,env,cors);
+if(path==='/api/products/checkout'&&method==='POST')return await handleInventoryCheckout(request,env,cors);
+if(/^\/api\/products\/[^/]+$/.test(path)&&method==='DELETE')return await handleDeleteProduct(decodeURIComponent(path.split('/')[3]),request,env,cors);
+return jsonResponse({error:'Endpoint not found'},404,cors)}catch(error){console.error('API Error:',error);return jsonResponse({error:'Internal server error'},500,cors)}}};
 
-export default {
-  async fetch(request, env) {
-    const corsHeaders = getCorsHeaders(request, env);
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
-    if (!isAllowedStateChangingOrigin(request, env)) return jsonResponse({ error: 'Forbidden origin' }, 403, corsHeaders);
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const method = request.method;
-    try {
-      if (path === '/api/health' && method === 'GET') return jsonResponse({ status: 'ok', message: 'Pembukuan API is running ⚡', timestamp: new Date().toISOString() }, 200, corsHeaders);
-      if (path === '/api/auth/register' && method === 'POST') return await handleRegister(request, env, corsHeaders);
-      if (path === '/api/auth/login' && method === 'POST') return await handleLogin(request, env, corsHeaders);
-      if (path === '/api/auth/logout' && method === 'POST') return await handleLogout(request, env, corsHeaders);
-      if (path === '/api/auth/profile' && method === 'GET') return await handleGetProfile(request, env, corsHeaders);
-      if (path === '/api/admin/config-status' && method === 'GET') return await handleAdminConfigStatus(request, env, corsHeaders);
-      if (path === '/api/admin/users' && method === 'GET') return await handleGetUsers(request, env, corsHeaders);
-      if (path === '/api/admin/overview' && method === 'GET') return await handleAdminOverview(request, env, corsHeaders);
-      if (path === '/api/admin/audit' && method === 'GET') return await handleAdminAudit(request, env, corsHeaders);
-      if (path === '/api/transactions' && method === 'POST') return await handleSaveTransactions(request, env, corsHeaders);
-      if (path.match(/^\/api\/transactions\/[^/]+$/) && method === 'GET') return await handleGetTransactions(decodeURIComponent(path.split('/')[3]), request, env, corsHeaders);
-      if (path.match(/^\/api\/transactions\/[^/]+\/[^/]+$/) && method === 'DELETE') { const parts = path.split('/'); return await handleDeleteTransaction(decodeURIComponent(parts[3]), decodeURIComponent(parts[4]), request, env, corsHeaders); }
-      if (path.match(/^\/api\/stats\/[^/]+$/) && method === 'GET') return await handleGetStats(decodeURIComponent(path.split('/')[3]), request, env, corsHeaders);
-      if (path.match(/^\/api\/export\/[^/]+$/) && method === 'GET') return await handleExport(decodeURIComponent(path.split('/')[3]), request, env, corsHeaders);
-      return jsonResponse({ error: 'Endpoint not found' }, 404, corsHeaders);
-    } catch (error) {
-      console.error('API Error:', error);
-      return jsonResponse({ error: 'Internal server error' }, 500, corsHeaders);
-    }
-  }
-};
+function getAllowedOrigins(env){const x=env.ALLOWED_ORIGINS?env.ALLOWED_ORIGINS.split(',').map(v=>v.trim()).filter(Boolean):[];return x.length?x:['https://viqiquotex-art.github.io','https://vixora.my.id','https://www.vixora.my.id','http://localhost:5173','http://localhost:5174','http://127.0.0.1:5173','http://127.0.0.1:5174']}
+function isAllowedStateChangingOrigin(request,env){if(!['POST','PUT','PATCH','DELETE'].includes(request.method))return true;const o=request.headers.get('Origin');return !o||getAllowedOrigins(env).includes(o)}
+function getCorsHeaders(request,env){const o=request.headers.get('Origin'),a=getAllowedOrigins(env);const h={'Access-Control-Allow-Methods':'GET, POST, PUT, DELETE, OPTIONS','Access-Control-Allow-Headers':'Content-Type, Authorization','Access-Control-Allow-Credentials':'true','Access-Control-Max-Age':'86400','Content-Type':'application/json','Vary':'Origin','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','Content-Security-Policy':"default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",'Permissions-Policy':'camera=(), microphone=(), geolocation=(), payment=()'};if(o&&a.includes(o))h['Access-Control-Allow-Origin']=o;return h}
+function withCookie(h,c){return c?{...h,'Set-Cookie':c}:h}function buildSessionCookie(t){return `${SESSION_COOKIE}=${encodeURIComponent(t)}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${SESSION_TTL_SECONDS}`}function clearSessionCookie(){return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0`}function getCookie(r,n){const s=r.headers.get('Cookie')||'';for(const p of s.split(';')){const i=p.indexOf('=');if(i<0)continue;if(p.slice(0,i).trim()===n){try{return decodeURIComponent(p.slice(i+1).trim())}catch{return null}}}return null}
+function getAuthToken(r){const a=r.headers.get('Authorization')||'';return a.startsWith('Bearer ')?a.slice(7).trim():getCookie(r,SESSION_COOKIE)}async function getTokenOwner(t,kv){if(!t||!kv)return null;const raw=await kv.get(`session:${t}`);if(!raw)return null;try{const s=JSON.parse(raw);return typeof s.userId==='string'?s.userId:null}catch{return null}}function requireOwner(r,env){return getTokenOwner(getAuthToken(r),env.PEMBUKUAN_KV)}
+async function createSession(kv,t,u){await kv.put(`session:${t}`,JSON.stringify({userId:u,createdAt:new Date().toISOString()}),{expirationTtl:SESSION_TTL_SECONDS})}
+async function handleRegister(r,env,c){try{const b=await r.json(),{email,password,name}=b||{};if(!email||!password||!name)return jsonResponse({error:'Missing required fields: email, password, name'},400,c);if(typeof email!=='string'||email.length>254||!isValidEmail(email))return jsonResponse({error:'Invalid email format'},400,c);if(typeof password!=='string'||password.length<8||password.length>1000)return jsonResponse({error:'Password must be between 8 and 1000 characters'},400,c);if(typeof name!=='string'||name.trim().length<2||name.trim().length>100)return jsonResponse({error:'Name must be between 2 and 100 characters'},400,c);const kv=env.PEMBUKUAN_KV;if(!kv)throw Error('PEMBUKUAN_KV binding is not configured');const e=email.trim().toLowerCase(),rate=await checkRateLimit(kv,`register:${e}:${getClientKey(r)}`,REGISTER_MAX_ATTEMPTS,REGISTER_WINDOW_SECONDS);if(!rate.allowed)return rateLimitResponse(rate,c);if(await kv.get(`user:${e}`))return jsonResponse({error:'Email already registered'},409,c);const userId=generateId(),pd=await hashPassword(password),now=new Date().toISOString(),user={userId,email:e,name:name.trim(),passwordHash:pd.hash,passwordSalt:pd.salt,passwordVersion:1,createdAt:now,lastLogin:now},token=generateToken();await kv.put(`user:${e}`,JSON.stringify(user));await kv.put(`user:${userId}`,JSON.stringify(user));await createSession(kv,token,userId);await recordAudit(env,{action:'REGISTER',status:'SUCCESS',userId,email:e,metadata:{source:'auth'}});return jsonResponse({success:true,message:'Registration successful',userId,name:user.name,email:user.email,token,expiresIn:SESSION_TTL_SECONDS},201,withCookie(c,buildSessionCookie(token)))}catch(error){console.error(error);return jsonResponse({error:'Registration failed'},500,c)}}
+async function handleLogin(r,env,c){try{const b=await r.json(),{email,password}=b||{};if(!email||!password)return jsonResponse({error:'Missing email or password'},400,c);if(typeof email!=='string'||email.length>254||!isValidEmail(email))return jsonResponse({error:'Invalid email format'},400,c);if(typeof password!=='string'||password.length>1000)return jsonResponse({error:'Invalid password'},400,c);const kv=env.PEMBUKUAN_KV,e=email.trim().toLowerCase(),rate=await checkRateLimit(kv,`login:${e}:${getClientKey(r)}`,LOGIN_MAX_ATTEMPTS,LOGIN_WINDOW_SECONDS);if(!rate.allowed){await recordAudit(env,{action:'LOGIN_FAILED',status:'RATE_LIMITED',email:e,metadata:{reason:'rate_limit'}});return rateLimitResponse(rate,c)}const raw=await kv.get(`user:${e}`);if(!raw){await recordAudit(env,{action:'LOGIN_FAILED',status:'FAILURE',email:e,metadata:{reason:'unknown_account'}});return jsonResponse({error:'Invalid email or password'},401,c)}const user=JSON.parse(raw);let valid=user.passwordHash&&user.passwordSalt?await verifyPassword(password,user.passwordHash,user.passwordSalt):user.password===encodeLegacyPassword(password);if(!valid){await recordAudit(env,{action:'LOGIN_FAILED',status:'FAILURE',userId:user.userId,email:e,metadata:{reason:'invalid_credentials'}});return jsonResponse({error:'Invalid email or password'},401,c)}await clearRateLimit(kv,`login:${e}:${getClientKey(r)}`);if(user.password){const pd=await hashPassword(password);user.passwordHash=pd.hash;user.passwordSalt=pd.salt;user.passwordVersion=1;delete user.password}user.lastLogin=new Date().toISOString();const token=generateToken();await kv.put(`user:${e}`,JSON.stringify(user));await kv.put(`user:${user.userId}`,JSON.stringify(user));await createSession(kv,token,user.userId);await recordAudit(env,{action:'LOGIN_SUCCESS',status:'SUCCESS',userId:user.userId,email:e,metadata:{source:'auth'}});return jsonResponse({success:true,message:'Login successful',userId:user.userId,name:user.name,email:user.email,token,expiresIn:SESSION_TTL_SECONDS},200,withCookie(c,buildSessionCookie(token)))}catch(error){console.error(error);return jsonResponse({error:'Login failed'},500,c)}}
+function getClientKey(r){return (r.headers.get('CF-Connecting-IP')||r.headers.get('X-Forwarded-For')||'unknown').slice(0,100)}
+async function checkRateLimit(kv,id,max,window){const key=`${RATE_LIMIT_PREFIX}${id}`,now=Date.now();let state=null;const raw=await kv.get(key);if(raw)try{state=JSON.parse(raw)}catch{}if(!state||!Number.isFinite(state.startedAt)||now-state.startedAt>=window*1000)state={count:0,startedAt:now};if(state.count>=max)return{allowed:false,retryAfter:Math.max(1,Math.ceil((window*1000-(now-state.startedAt))/1000)),limit:max};state.count++;await kv.put(key,JSON.stringify(state),{expirationTtl:Math.max(1,Math.ceil((window*1000-(now-state.startedAt))/1000))});return{allowed:true,retryAfter:window,limit:max,remaining:max-state.count}}
+async function clearRateLimit(kv,id){await kv.delete(`${RATE_LIMIT_PREFIX}${id}`)}function rateLimitResponse(rate,c){return jsonResponse({error:'Too many authentication attempts. Please try again later.',retryAfter:rate.retryAfter},429,{...c,'Retry-After':String(rate.retryAfter)})}
+async function handleLogout(r,env,c){try{const t=getAuthToken(r),u=t?await getTokenOwner(t,env.PEMBUKUAN_KV):null;if(t)await env.PEMBUKUAN_KV.delete(`session:${t}`);if(u){const raw=await env.PEMBUKUAN_KV.get(`user:${u}`);let e='';try{e=raw?JSON.parse(raw).email||'':''}catch{}await recordAudit(env,{action:'LOGOUT',status:'SUCCESS',userId:u,email:e,metadata:{source:'auth'}})}return jsonResponse({success:true,message:'Logout successful'},200,withCookie(c,clearSessionCookie()))}catch{return jsonResponse({error:'Logout failed'},500,c)}}
+async function handleGetProfile(r,env,c){try{const u=await requireOwner(r,env);if(!u)return jsonResponse({error:'Invalid or expired session'},401,c);const raw=await env.PEMBUKUAN_KV.get(`user:${u}`);if(!raw)return jsonResponse({error:'User not found'},404,c);const x=JSON.parse(raw);return jsonResponse({success:true,userId:x.userId,name:x.name,email:x.email,createdAt:x.createdAt,lastLogin:x.lastLogin},200,c)}catch{return jsonResponse({error:'Failed to get profile'},500,c)}}
+async function requireAdmin(r,env){const u=await requireOwner(r,env);if(!u)return{ok:false,status:401,error:'Invalid or expired session'};const adminEmail=typeof env.ADMIN_EMAIL==='string'?env.ADMIN_EMAIL.trim().toLowerCase():'';if(!adminEmail)return{ok:false,status:503,error:'Admin configuration is missing'};const raw=await env.PEMBUKUAN_KV.get(`user:${u}`);if(!raw)return{ok:false,status:404,error:'Admin user not found'};let user;try{user=JSON.parse(raw)}catch{return{ok:false,status:404,error:'Admin user data is invalid'}}if(String(user.email||'').trim().toLowerCase()!==adminEmail)return{ok:false,status:403,error:'Forbidden: admin access required'};return{ok:true,userId:u,email:adminEmail}}
+async function handleAdminConfigStatus(r,env,c){const a=await requireAdmin(r,env);if(!a.ok)return jsonResponse({error:a.error},a.status,c);return jsonResponse({success:true,adminConfigured:Boolean(env.ADMIN_EMAIL),kvConfigured:Boolean(env.PEMBUKUAN_KV),checkedAt:new Date().toISOString()},200,c)}
+async function listUsers(env){const keys=[];let cur;do{const p=await env.PEMBUKUAN_KV.list({prefix:'user:',cursor:cur});keys.push(...p.keys);cur=p.list_complete?undefined:p.cursor}while(cur);const out=[];for(let i=0;i<keys.length;i+=50){const vals=await Promise.all(keys.slice(i,i+50).map(k=>env.PEMBUKUAN_KV.get(k.name)));vals.forEach((v,j)=>{if(!v)return;try{const u=JSON.parse(v);if(keys[i+j].name===`user:${u.userId}`)out.push({userId:u.userId,name:u.name,email:u.email,createdAt:u.createdAt,lastLogin:u.lastLogin})}catch{}})}return out}
+async function handleGetUsers(r,env,c){try{const a=await requireAdmin(r,env);if(!a.ok)return jsonResponse({error:a.error},a.status,c);const users=await listUsers(env),ae=env.ADMIN_EMAIL.trim().toLowerCase();const u=users.map(x=>({...x,isAdmin:String(x.email||'').trim().toLowerCase()===ae})).sort((x,y)=>Date.parse(y.createdAt||0)-Date.parse(x.createdAt||0));await recordAudit(env,{action:'ADMIN_USERS_VIEW',status:'SUCCESS',userId:a.userId,email:a.email,metadata:{count:u.length}});return jsonResponse({success:true,count:u.length,users:u},200,c)}catch{return jsonResponse({error:'Failed to get users'},500,c)}}
+function startOfUtcDay(d){const x=new Date(d);x.setUTCHours(0,0,0,0);return x}function dayKey(d){try{return new Date(d).toISOString().slice(0,10)}catch{return''}}function buildDailyBuckets(days){const a=[],now=startOfUtcDay(new Date);for(let i=days-1;i>=0;i--){const d=new Date(now);d.setUTCDate(d.getUTCDate()-i);a.push({date:dayKey(d),registrations:0,logins:0,failedLogins:0})}return a}
+async function getAuditEvents(env,limit=5000){const events=[];let cur;do{const p=await env.PEMBUKUAN_KV.list({prefix:AUDIT_PREFIX,limit:1000,cursor:cur});const vals=await Promise.all(p.keys.map(k=>env.PEMBUKUAN_KV.get(k.name)));vals.forEach(v=>{if(v)try{events.push(JSON.parse(v))}catch{}});if(events.length>=limit)break;cur=p.list_complete?undefined:p.cursor}while(cur);events.sort((a,b)=>Date.parse(b.timestamp||0)-Date.parse(a.timestamp||0));return events.slice(0,limit)}
+async function handleAdminOverview(r,env,c){try{const a=await requireAdmin(r,env);if(!a.ok)return jsonResponse({error:a.error},a.status,c);const days=Math.max(1,Math.min(90,Number.parseInt(new URL(r.url).searchParams.get('days'),10)||30)),users=await listUsers(env),events=await getAuditEvents(env,5000),now=Date.now(),buckets=buildDailyBuckets(days),map=new Map(buckets.map(x=>[x.date,x]));users.forEach(u=>{const b=map.get(dayKey(u.createdAt));if(b)b.registrations++});events.forEach(e=>{const b=map.get(dayKey(e.timestamp));if(b){if(e.action==='LOGIN_SUCCESS')b.logins++;if(e.action==='LOGIN_FAILED')b.failedLogins++}});const ok=events.filter(e=>e.action==='LOGIN_SUCCESS'),fail=events.filter(e=>e.action==='LOGIN_FAILED'),adminEmail=String(env.ADMIN_EMAIL||'').trim().toLowerCase(),roles={admin:users.filter(u=>String(u.email||'').trim().toLowerCase()===adminEmail).length,user:0};roles.user=users.length-roles.admin;return jsonResponse({success:true,generatedAt:new Date().toISOString(),rangeDays:days,summary:{totalUsers:users.length,activeUsers30d:users.filter(u=>Date.parse(u.lastLogin||0)>=now-2592e6).length,newUsers7d:users.filter(u=>Date.parse(u.createdAt||0)>=now-6048e5).length,registrationsToday:users.filter(u=>Date.parse(u.createdAt||0)>=startOfUtcDay(new Date).getTime()).length,login24h:ok.filter(e=>Date.parse(e.timestamp||0)>=now-86400000).length,failedLogin24h:fail.filter(e=>Date.parse(e.timestamp||0)>=now-86400000).length,roles},series:buckets,audit:{totalLoginSuccess:ok.length,totalLoginFailed:fail.length}},200,c)}catch{return jsonResponse({error:'Failed to build admin overview'},500,c)}}
+async function handleAdminAudit(r,env,c){try{const a=await requireAdmin(r,env);if(!a.ok)return jsonResponse({error:a.error},a.status,c);const q=new URL(r.url).searchParams,page=Math.max(1,Number.parseInt(q.get('page'),10)||1),size=Math.min(MAX_AUDIT_PAGE_SIZE,Math.max(1,Number.parseInt(q.get('pageSize'),10)||25)),action=String(q.get('action')||'all').toUpperCase(),status=String(q.get('status')||'all').toUpperCase(),term=String(q.get('q')||'').toLowerCase().slice(0,100),from=Date.parse(q.get('from')||'')||0,toRaw=Date.parse(q.get('to')||''),to=toRaw?toRaw+86400000-1:Infinity;let ev=await getAuditEvents(env,5000);ev=ev.filter(e=>(action==='ALL'||e.action===action)&&(status==='ALL'||e.status===status)&&(!term||`${e.email||''} ${e.userId||''} ${e.action||''} ${e.metadata?.reason||''}`.toLowerCase().includes(term))).filter(e=>{const t=Date.parse(e.timestamp||'');return Number.isFinite(t)&&t>=from&&t<=to});const pages=Math.max(1,Math.ceil(ev.length/size)),safe=Math.min(page,pages),items=ev.slice((safe-1)*size,safe*size);return jsonResponse({success:true,page:safe,pageSize:size,total:ev.length,totalPages:pages,events:items},200,c)}catch{return jsonResponse({error:'Failed to get audit log'},500,c)}}
+async function recordAudit(env,event){try{if(!env.PEMBUKUAN_KV)return false;const safe={id:generateId(),timestamp:new Date().toISOString(),action:String(event.action||'UNKNOWN').slice(0,60),status:String(event.status||'SUCCESS').slice(0,40),userId:typeof event.userId==='string'?event.userId.slice(0,100):undefined,email:typeof event.email==='string'?event.email.trim().toLowerCase().slice(0,254):undefined,metadata:sanitizeAuditMetadata(event.metadata)};Object.keys(safe).forEach(k=>safe[k]===undefined&&delete safe[k]);const key=`${AUDIT_PREFIX}${String(9999999999999-Date.now()).padStart(13,'0')}:${safe.id}`;await env.PEMBUKUAN_KV.put(key,JSON.stringify(safe),{expirationTtl:AUDIT_RETENTION_SECONDS});return true}catch{return false}}
+function sanitizeAuditMetadata(m){if(!m||typeof m!=='object'||Array.isArray(m))return{};const s={};Object.entries(m).slice(0,10).forEach(([k,v])=>{const key=String(k).slice(0,40);if(typeof v==='string')s[key]=v.slice(0,200);else if(typeof v==='number'||typeof v==='boolean')s[key]=v});return s}
+function validateTransaction(t){if(!t||typeof t!=='object'||Array.isArray(t))return{valid:false,error:'Invalid transaction object'};if(typeof t.id!=='string'||!t.id.length||t.id.length>MAX_TRANSACTION_ID_LENGTH||!/^[A-Za-z0-9_-]+$/.test(t.id))return{valid:false,error:'Invalid transaction ID'};if(t.type!=='income'&&t.type!=='expense')return{valid:false,error:'Transaction type must be income or expense'};if(typeof t.category!=='string'||!t.category.trim()||t.category.length>MAX_CATEGORY_LENGTH)return{valid:false,error:'Invalid transaction category'};if(typeof t.amount!=='number'||!Number.isFinite(t.amount)||t.amount<=0||t.amount>MAX_TRANSACTION_AMOUNT)return{valid:false,error:'Invalid transaction amount'};if(typeof t.date!=='string'||!isValidDateOnly(t.date))return{valid:false,error:'Invalid transaction date'};if(t.description!=null&&(typeof t.description!=='string'||t.description.length>MAX_DESCRIPTION_LENGTH))return{valid:false,error:'Invalid transaction description'};return{valid:true}}
+function isValidDateOnly(v){if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return false;const d=new Date(`${v}T00:00:00Z`);return !Number.isNaN(d.getTime())&&d.toISOString().slice(0,10)===v}function transactionKey(u,id){return`${TX_PREFIX}${u}:${id}`}async function listTransactions(u,env,deleted=new Set()){const out=[];let cur;do{const p=await env.PEMBUKUAN_KV.list({prefix:`${TX_PREFIX}${u}:`,cursor:cur});const vals=await Promise.all(p.keys.map(k=>env.PEMBUKUAN_KV.get(k.name)));vals.forEach((raw,i)=>{if(!raw)return;const id=p.keys[i].name.slice(`${TX_PREFIX}${u}:`.length);if(deleted.has(id))return;try{const t=JSON.parse(raw);if(validateTransaction(t).valid)out.push(t)}catch{}});cur=p.list_complete?undefined:p.cursor}while(cur);out.sort((a,b)=>new Date(b.date)-new Date(a.date)||getTimestamp(b)-getTimestamp(a));return out}
+async function getDeletedIds(u,env){const ids=[];let cur;do{const p=await env.PEMBUKUAN_KV.list({prefix:`${DELETED_PREFIX}${u}:`,cursor:cur});p.keys.forEach(k=>ids.push(k.name.slice(`${DELETED_PREFIX}${u}:`.length)));cur=p.list_complete?undefined:p.cursor}while(cur);return ids}
+async function migrateLegacyTransactions(u,env,deleted=new Set()){const key=`${LEGACY_TRANSACTIONS_PREFIX}${u}`,raw=await env.PEMBUKUAN_KV.get(key);if(!raw)return;try{const arr=JSON.parse(raw);if(!Array.isArray(arr))return;for(const t of arr)if(validateTransaction(t).valid&&!deleted.has(t.id)){const k=transactionKey(u,t.id);if(!(await env.PEMBUKUAN_KV.get(k)))await env.PEMBUKUAN_KV.put(k,JSON.stringify(t))}await env.PEMBUKUAN_KV.delete(key)}catch{}}
+async function handleSaveTransactions(r,env,c){try{const b=await r.json(),{userId,transactions}=b||{};if(typeof userId!=='string'||!userId.trim()||userId.length>100||!Array.isArray(transactions)||transactions.length>MAX_TRANSACTIONS_PER_SYNC)return jsonResponse({error:'Invalid userId or transactions'},400,c);const owner=await requireOwner(r,env);if(!owner)return jsonResponse({error:'Invalid or expired session'},401,c);if(owner!==userId)return jsonResponse({error:'Unauthorized'},403,c);const incoming=new Set();for(const t of transactions){const v=validateTransaction(t);if(!v.valid)return jsonResponse({error:v.error},400,c);if(incoming.has(t.id))return jsonResponse({error:`Duplicate transaction ID: ${t.id}`},400,c);incoming.add(t.id)}const deleted=new Set(await getDeletedIds(userId,env));await migrateLegacyTransactions(userId,env,deleted);let saved=0;for(const t of transactions){if(deleted.has(t.id))continue;const k=transactionKey(userId,t.id),raw=await env.PEMBUKUAN_KV.get(k);let write=true;if(raw)try{write=getTimestamp(t)>getTimestamp(JSON.parse(raw))}catch{write=false}if(write){await env.PEMBUKUAN_KV.put(k,JSON.stringify(t));saved++}}const result=await listTransactions(userId,env,deleted);if(saved){const u=await env.PEMBUKUAN_KV.get(`user:${userId}`);let e='';try{e=u?JSON.parse(u).email||'':''}catch{}await recordAudit(env,{action:'TRANSACTIONS_SYNC',status:'SUCCESS',userId,email:e,metadata:{saved}})}return jsonResponse({success:true,count:result.length,saved,transactions:result,deletedIds:Array.from(deleted)},200,c)}catch{return jsonResponse({error:'Failed to save transactions'},500,c)}}
+async function handleGetTransactions(u,r,env,c){try{const owner=await requireOwner(r,env);if(!owner)return jsonResponse({error:'Invalid or expired session'},401,c);if(owner!==u)return jsonResponse({error:'Unauthorized'},403,c);const deleted=new Set(await getDeletedIds(u,env));await migrateLegacyTransactions(u,env,deleted);const t=await listTransactions(u,env,deleted);return jsonResponse({success:true,userId:u,transactions:t,count:t.length,deletedIds:Array.from(deleted)},200,c)}catch{return jsonResponse({error:'Failed to get transactions'},500,c)}}
+async function handleDeleteTransaction(u,id,r,env,c){try{const owner=await requireOwner(r,env);if(!owner)return jsonResponse({error:'Invalid or expired session'},401,c);if(owner!==u)return jsonResponse({error:'Unauthorized'},403,c);if(!/^[A-Za-z0-9_-]{1,100}$/.test(id))return jsonResponse({error:'Invalid transaction ID'},400,c);const at=new Date().toISOString();await env.PEMBUKUAN_KV.put(`${DELETED_PREFIX}${u}:${id}`,JSON.stringify({transactionId:id,deletedAt:at}));await env.PEMBUKUAN_KV.delete(transactionKey(u,id));await env.PEMBUKUAN_KV.delete(`${LEGACY_TRANSACTIONS_PREFIX}${u}`);return jsonResponse({success:true,transactionId:id,deletedAt:at},200,c)}catch{return jsonResponse({error:'Failed to delete transaction'},500,c)}}
+async function handleGetStats(u,r,env,c){try{const owner=await requireOwner(r,env);if(!owner)return jsonResponse({error:'Invalid or expired session'},401,c);if(owner!==u)return jsonResponse({error:'Unauthorized'},403,c);const deleted=new Set(await getDeletedIds(u,env));const t=await listTransactions(u,env,deleted),income=t.filter(x=>x.type==='income').reduce((s,x)=>s+x.amount,0),expense=t.filter(x=>x.type==='expense').reduce((s,x)=>s+x.amount,0);return jsonResponse({success:true,userId:u,stats:{totalIncome:income,totalExpense:expense,balance:income-expense,transactionCount:t.length}},200,c)}catch{return jsonResponse({error:'Failed to get stats'},500,c)}}
+async function handleExport(u,r,env,c){try{const owner=await requireOwner(r,env);if(!owner)return jsonResponse({error:'Invalid or expired session'},401,c);if(owner!==u)return jsonResponse({error:'Unauthorized'},403,c);const deleted=new Set(await getDeletedIds(u,env)),t=await listTransactions(u,env,deleted);return jsonResponse({success:true,userId:u,transactions:t,count:t.length},200,c)}catch{return jsonResponse({error:'Failed to export data'},500,c)}}
 
-function getAllowedOrigins(env) {
-  const configuredOrigins = env.ALLOWED_ORIGINS ? env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean) : [];
-  return configuredOrigins.length ? configuredOrigins : ['https://viqiquotex-art.github.io', 'https://vixora.my.id', 'https://www.vixora.my.id', 'http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173', 'http://127.0.0.1:5174'];
-}
-function isAllowedStateChangingOrigin(request, env) {
-  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return true;
-  const origin = request.headers.get('Origin');
-  if (!origin) return true;
-  return getAllowedOrigins(env).includes(origin);
-}
+// -------- Server-authoritative Kasir inventory --------
+function productKey(u,id){return`${PRODUCT_PREFIX}${u}:${id}`}function validProduct(p){return p&&typeof p==='object'&&typeof p.id==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(p.id)&&typeof p.name==='string'&&p.name.trim().length>0&&p.name.length<=MAX_PRODUCT_NAME_LENGTH&&Number.isInteger(Number(p.price))&&Number(p.price)>0&&Number(p.price)<=MAX_PRODUCT_PRICE&&Number.isInteger(Number(p.stock))&&Number(p.stock)>=0&&Number(p.stock)<=MAX_PRODUCT_STOCK}
+async function listProducts(u,env){const out=[];let cur;do{const page=await env.PEMBUKUAN_KV.list({prefix:`${PRODUCT_PREFIX}${u}:`,cursor:cur});const vals=await Promise.all(page.keys.map(k=>env.PEMBUKUAN_KV.get(k.name)));vals.forEach(v=>{if(v)try{const p=JSON.parse(v);if(validProduct(p))out.push(p)}catch{}});cur=page.list_complete?undefined:page.cursor}while(cur);return out.sort((a,b)=>String(a.name).localeCompare(String(b.name),'id'))}
+async function handleGetProducts(r,env,c){const u=await requireOwner(r,env);if(!u)return jsonResponse({error:'Invalid or expired session'},401,c);return jsonResponse({success:true,products:await listProducts(u,env)},200,c)}
+async function handlePutProducts(r,env,c){try{const u=await requireOwner(r,env);if(!u)return jsonResponse({error:'Invalid or expired session'},401,c);const b=await r.json(),p=b?.product;if(!validProduct(p))return jsonResponse({error:'Invalid product'},400,c);p.name=p.name.trim();p.updatedAt=new Date().toISOString();const products=await listProducts(u,env);if(products.length>=MAX_PRODUCTS&&!products.some(x=>x.id===p.id))return jsonResponse({error:`Maximum ${MAX_PRODUCTS} products`},400,c);await env.PEMBUKUAN_KV.put(productKey(u,p.id),JSON.stringify(p));return jsonResponse({success:true,product:p},200,c)}catch{return jsonResponse({error:'Failed to save product'},500,c)}}
+async function handleDeleteProduct(id,r,env,c){try{const u=await requireOwner(r,env);if(!u)return jsonResponse({error:'Invalid or expired session'},401,c);if(!/^[A-Za-z0-9_-]{1,100}$/.test(id))return jsonResponse({error:'Invalid product ID'},400,c);await env.PEMBUKUAN_KV.delete(productKey(u,id));return jsonResponse({success:true,productId:id},200,c)}catch{return jsonResponse({error:'Failed to delete product'},500,c)}}
+async function handleInventoryCheckout(r,env,c){try{const u=await requireOwner(r,env);if(!u)return jsonResponse({error:'Invalid or expired session'},401,c);const b=await r.json(),items=Array.isArray(b?.items)?b.items:[];if(!items.length||items.length>100)return jsonResponse({error:'Invalid checkout items'},400,c);const normalized=[];for(const i of items){if(typeof i?.productId!=='string'||!Number.isInteger(Number(i.qty))||Number(i.qty)<=0)return jsonResponse({error:'Invalid checkout item'},400,c);const raw=await env.PEMBUKUAN_KV.get(productKey(u,i.productId));if(!raw)return jsonResponse({error:`Product not found: ${i.productId}`},404,c);const p=JSON.parse(raw),qty=Number(i.qty);if(!validProduct(p)||p.stock<qty)return jsonResponse({error:`Insufficient stock: ${p?.name||i.productId}`},409,c);normalized.push({p,qty})}const updated=[];for(const x of normalized){x.p.stock-=x.qty;x.p.updatedAt=new Date().toISOString();await env.PEMBUKUAN_KV.put(productKey(u,x.p.id),JSON.stringify(x.p));updated.push({productId:x.p.id,stock:x.p.stock})}return jsonResponse({success:true,updated},200,c)}catch{return jsonResponse({error:'Inventory checkout failed'},500,c)}}
 
-async function handleRegister(request, env, corsHeaders) {
-  try {
-    const body = await request.json();
-    const { email, password, name } = body || {};
-    if (!email || !password || !name) return jsonResponse({ error: 'Missing required fields: email, password, name' }, 400, corsHeaders);
-    if (typeof email !== 'string' || email.length > 254 || !isValidEmail(email)) return jsonResponse({ error: 'Invalid email format' }, 400, corsHeaders);
-    if (typeof password !== 'string' || password.length < 8 || password.length > 1000) return jsonResponse({ error: 'Password must be between 8 and 1000 characters' }, 400, corsHeaders);
-    if (typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 100) return jsonResponse({ error: 'Name must be between 2 and 100 characters' }, 400, corsHeaders);
-    const kv = env.PEMBUKUAN_KV;
-    if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
-    const normalizedEmail = email.trim().toLowerCase();
-    const rate = await checkRateLimit(kv, `register:${normalizedEmail}`, REGISTER_MAX_ATTEMPTS, REGISTER_WINDOW_SECONDS);
-    if (!rate.allowed) return rateLimitResponse(rate, corsHeaders);
-    if (await kv.get(`user:${normalizedEmail}`)) return jsonResponse({ error: 'Email already registered' }, 409, corsHeaders);
-    const userId = generateId();
-    const passwordData = await hashPassword(password);
-    const now = new Date().toISOString();
-    const user = { userId, email: normalizedEmail, name: name.trim(), passwordHash: passwordData.hash, passwordSalt: passwordData.salt, passwordVersion: 1, createdAt: now, lastLogin: now };
-    const token = generateToken();
-    await kv.put(`user:${normalizedEmail}`, JSON.stringify(user));
-    await kv.put(`user:${userId}`, JSON.stringify(user));
-    await createSession(kv, token, userId);
-    await recordAudit(env, { action: 'REGISTER', status: 'SUCCESS', userId, email: normalizedEmail, metadata: { source: 'auth' } });
-    return jsonResponse({ success: true, message: 'Registration successful', userId, name: user.name, email: user.email, token, expiresIn: SESSION_TTL_SECONDS }, 201, withCookie(corsHeaders, buildSessionCookie(token)));
-  } catch (error) { console.error('Register error:', error); return jsonResponse({ error: 'Registration failed' }, 500, corsHeaders); }
-}
-
-async function handleLogin(request, env, corsHeaders) {
-  try {
-    const body = await request.json();
-    const { email, password } = body || {};
-    if (!email || !password) return jsonResponse({ error: 'Missing email or password' }, 400, corsHeaders);
-    if (typeof email !== 'string' || email.length > 254 || !isValidEmail(email)) return jsonResponse({ error: 'Invalid email format' }, 400, corsHeaders);
-    if (typeof password !== 'string' || password.length > 1000) return jsonResponse({ error: 'Invalid password' }, 400, corsHeaders);
-    const kv = env.PEMBUKUAN_KV;
-    if (!kv) throw new Error('PEMBUKUAN_KV binding is not configured');
-    const normalizedEmail = email.trim().toLowerCase();
-    const rate = await checkRateLimit(kv, `login:${normalizedEmail}`, LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_SECONDS);
-    if (!rate.allowed) { await recordAudit(env, { action: 'LOGIN_FAILED', status: 'RATE_LIMITED', email: normalizedEmail, metadata: { reason: 'rate_limit' } }); return rateLimitResponse(rate, corsHeaders); }
-    const raw = await kv.get(`user:${normalizedEmail}`);
-    if (!raw) { await recordAudit(env, { action: 'LOGIN_FAILED', status: 'FAILURE', email: normalizedEmail, metadata: { reason: 'unknown_account' } }); return jsonResponse({ error: 'Invalid email or password' }, 401, corsHeaders); }
-    const user = JSON.parse(raw);
-    let valid = false;
-    if (user.passwordHash && user.passwordSalt) valid = await verifyPassword(password, user.passwordHash, user.passwordSalt);
-    else if (user.password) valid = user.password === encodeLegacyPassword(password);
-    if (!valid) { await recordAudit(env, { action: 'LOGIN_FAILED', status: 'FAILURE', userId: user.userId, email: normalizedEmail, metadata: { reason: 'invalid_credentials' } }); return jsonResponse({ error: 'Invalid email or password' }, 401, corsHeaders); }
-    await clearRateLimit(kv, `login:${normalizedEmail}`);
-    if (user.password) { const passwordData = await hashPassword(password); user.passwordHash = passwordData.hash; user.passwordSalt = passwordData.salt; user.passwordVersion = 1; delete user.password; }
-    user.lastLogin = new Date().toISOString();
-    const token = generateToken();
-    await kv.put(`user:${normalizedEmail}`, JSON.stringify(user));
-    await kv.put(`user:${user.userId}`, JSON.stringify(user));
-    await createSession(kv, token, user.userId);
-    await recordAudit(env, { action: 'LOGIN_SUCCESS', status: 'SUCCESS', userId: user.userId, email: normalizedEmail, metadata: { source: 'auth' } });
-    return jsonResponse({ success: true, message: 'Login successful', userId: user.userId, name: user.name, email: user.email, token, expiresIn: SESSION_TTL_SECONDS }, 200, withCookie(corsHeaders, buildSessionCookie(token)));
-  } catch (error) { console.error('Login error:', error); return jsonResponse({ error: 'Login failed' }, 500, corsHeaders); }
-}
-
-async function checkRateLimit(kv, identifier, maxAttempts, windowSeconds) {
-  const key = `${RATE_LIMIT_PREFIX}${identifier}`; const now = Date.now(); const raw = await kv.get(key); let state = null;
-  if (raw) { try { state = JSON.parse(raw); } catch { state = null; } }
-  if (!state || !Number.isFinite(state.startedAt) || now - state.startedAt >= windowSeconds * 1000) state = { count: 0, startedAt: now };
-  if (state.count >= maxAttempts) { const retryAfter = Math.max(1, Math.ceil((windowSeconds * 1000 - (now - state.startedAt)) / 1000)); return { allowed: false, retryAfter, limit: maxAttempts }; }
-  state.count += 1; const remainingTtl = Math.max(1, Math.ceil((windowSeconds * 1000 - (now - state.startedAt)) / 1000));
-  await kv.put(key, JSON.stringify(state), { expirationTtl: remainingTtl });
-  return { allowed: true, retryAfter: remainingTtl, limit: maxAttempts, remaining: Math.max(0, maxAttempts - state.count) };
-}
-async function clearRateLimit(kv, identifier) { await kv.delete(`${RATE_LIMIT_PREFIX}${identifier}`); }
-function rateLimitResponse(rate, corsHeaders) { return jsonResponse({ error: 'Too many authentication attempts. Please try again later.', retryAfter: rate.retryAfter }, 429, { ...corsHeaders, 'Retry-After': String(rate.retryAfter) }); }
-
-async function handleLogout(request, env, corsHeaders) {
-  try {
-    const token = getAuthToken(request);
-    const userId = token ? await getTokenOwner(token, env.PEMBUKUAN_KV) : null;
-    let email = '';
-    if (userId && env.PEMBUKUAN_KV) { const raw = await env.PEMBUKUAN_KV.get(`user:${userId}`); if (raw) { try { email = JSON.parse(raw).email || ''; } catch {} } }
-    if (token && env.PEMBUKUAN_KV) await env.PEMBUKUAN_KV.delete(`session:${token}`);
-    if (userId) await recordAudit(env, { action: 'LOGOUT', status: 'SUCCESS', userId, email, metadata: { source: 'auth' } });
-    return jsonResponse({ success: true, message: 'Logout successful' }, 200, withCookie(corsHeaders, clearSessionCookie()));
-  } catch (error) { console.error('Logout error:', error); return jsonResponse({ error: 'Logout failed' }, 500, corsHeaders); }
-}
-async function handleGetProfile(request, env, corsHeaders) {
-  try { const userId = await requireOwner(request, env); if (!userId) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); const data = await env.PEMBUKUAN_KV.get(`user:${userId}`); if (!data) return jsonResponse({ error: 'User not found' }, 404, corsHeaders); const user = JSON.parse(data); return jsonResponse({ success: true, userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin }, 200, corsHeaders); }
-  catch (error) { console.error('Profile error:', error); return jsonResponse({ error: 'Failed to get profile' }, 500, corsHeaders); }
-}
-
-async function requireAdmin(request, env) {
-  const ownerId = await requireOwner(request, env);
-  if (!ownerId) return { ok: false, status: 401, error: 'Invalid or expired token' };
-  const adminEmail = typeof env.ADMIN_EMAIL === 'string' ? env.ADMIN_EMAIL.trim().toLowerCase() : '';
-  if (!adminEmail) return { ok: false, status: 503, error: 'Admin configuration is missing' };
-  const ownerData = await env.PEMBUKUAN_KV.get(`user:${ownerId}`);
-  if (!ownerData) return { ok: false, status: 404, error: 'Admin user not found' };
-  let owner;
-  try { owner = JSON.parse(ownerData); } catch { return { ok: false, status: 404, error: 'Admin user data is invalid' }; }
-  const ownerEmail = typeof owner.email === 'string' ? owner.email.trim().toLowerCase() : '';
-  if (ownerEmail !== adminEmail) return { ok: false, status: 403, error: 'Forbidden: admin access required' };
-  return { ok: true, userId: ownerId, email: ownerEmail };
-}
-
-async function handleAdminConfigStatus(request, env, corsHeaders) {
-  try {
-    const admin = await requireAdmin(request, env);
-    if (!admin.ok) return jsonResponse({ error: admin.error }, admin.status, corsHeaders);
-    await recordAudit(env, { action: 'ADMIN_CONFIG_CHECK', status: 'SUCCESS', userId: admin.userId, email: admin.email, metadata: { endpoint: '/api/admin/config-status' } });
-    return jsonResponse({ success: true, adminConfigured: Boolean(env.ADMIN_EMAIL), kvConfigured: Boolean(env.PEMBUKUAN_KV), checkedAt: new Date().toISOString() }, 200, corsHeaders);
-  } catch (error) { console.error('Admin config status error:', error); return jsonResponse({ error: 'Failed to check admin configuration' }, 500, corsHeaders); }
-}
-
-async function listUsers(env) {
-  const users = [];
-  let cursor;
-  do {
-    const page = await env.PEMBUKUAN_KV.list({ prefix: 'user:', cursor });
-    for (const key of page.keys) {
-      const value = await env.PEMBUKUAN_KV.get(key.name);
-      if (!value) continue;
-      try {
-        const user = JSON.parse(value);
-        if (key.name !== `user:${user.userId}`) continue;
-        users.push({ userId: user.userId, name: user.name, email: user.email, createdAt: user.createdAt, lastLogin: user.lastLogin });
-      } catch {}
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  return users;
-}
-
-async function handleGetUsers(request, env, corsHeaders) {
-  try {
-    const admin = await requireAdmin(request, env);
-    if (!admin.ok) return jsonResponse({ error: admin.error }, admin.status, corsHeaders);
-    const users = await listUsers(env);
-    const usersWithRole = users.map(user => ({ ...user, isAdmin: String(user.email || '').trim().toLowerCase() === env.ADMIN_EMAIL.trim().toLowerCase() }));
-    usersWithRole.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    await recordAudit(env, { action: 'ADMIN_USERS_VIEW', status: 'SUCCESS', userId: admin.userId, email: admin.email, metadata: { count: usersWithRole.length } });
-    return jsonResponse({ success: true, count: usersWithRole.length, users: usersWithRole }, 200, corsHeaders);
-  } catch (error) { console.error('Admin users error:', error); return jsonResponse({ error: 'Failed to get users' }, 500, corsHeaders); }
-}
-
-function parsePositiveInt(value, fallback, max) { const n = Number.parseInt(value, 10); return Number.isFinite(n) && n > 0 ? Math.min(n, max) : fallback; }
-function startOfUtcDay(date) { const d = new Date(date); d.setUTCHours(0, 0, 0, 0); return d; }
-function dayKey(date) { return new Date(date).toISOString().slice(0, 10); }
-function buildDailyBuckets(days) { const buckets = []; const now = startOfUtcDay(new Date()); for (let i = days - 1; i >= 0; i--) { const d = new Date(now); d.setUTCDate(d.getUTCDate() - i); buckets.push({ date: dayKey(d), registrations: 0, logins: 0, failedLogins: 0 }); } return buckets; }
-
-async function getAuditEvents(env, options = {}) {
-  const limit = options.limit || 1000;
-  const events = [];
-  let cursor;
-  do {
-    const page = await env.PEMBUKUAN_KV.list({ prefix: AUDIT_PREFIX, limit: 1000, cursor });
-    for (const key of page.keys) {
-      const raw = await env.PEMBUKUAN_KV.get(key.name);
-      if (!raw) continue;
-      try { events.push(JSON.parse(raw)); } catch {}
-      if (events.length >= limit) break;
-    }
-    if (events.length >= limit) break;
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  events.sort((a, b) => Date.parse(b.timestamp || 0) - Date.parse(a.timestamp || 0));
-  return events;
-}
-
-async function handleAdminOverview(request, env, corsHeaders) {
-  try {
-    const admin = await requireAdmin(request, env);
-    if (!admin.ok) return jsonResponse({ error: admin.error }, admin.status, corsHeaders);
-    const url = new URL(request.url);
-    const days = parsePositiveInt(url.searchParams.get('days'), 30, 90);
-    const users = await listUsers(env);
-    const today = startOfUtcDay(new Date());
-    const activeCutoff = Date.now() - 30 * 86400000;
-    const new7Cutoff = Date.now() - 7 * 86400000;
-    const totalUsers = users.length;
-    const activeUsers30d = users.filter(u => Date.parse(u.lastLogin || '') >= activeCutoff).length;
-    const newUsers7d = users.filter(u => Date.parse(u.createdAt || '') >= new7Cutoff).length;
-    const registrationsToday = users.filter(u => Date.parse(u.createdAt || '') >= today.getTime()).length;
-    const events = await getAuditEvents(env, 5000);
-    const buckets = buildDailyBuckets(days);
-    const map = new Map(buckets.map(bucket => [bucket.date, bucket]));
-    for (const user of users) { const date = dayKey(user.createdAt); if (map.has(date)) map.get(date).registrations += 1; }
-    for (const event of events) {
-      const date = dayKey(event.timestamp); const bucket = map.get(date); if (!bucket) continue;
-      if (event.action === 'LOGIN_SUCCESS') bucket.logins += 1;
-      if (event.action === 'LOGIN_FAILED') bucket.failedLogins += 1;
-    }
-    const loginSuccess = events.filter(e => e.action === 'LOGIN_SUCCESS');
-    const failedLogin = events.filter(e => e.action === 'LOGIN_FAILED');
-    const login24h = loginSuccess.filter(e => Date.parse(e.timestamp) >= Date.now() - 86400000).length;
-    const failed24h = failedLogin.filter(e => Date.parse(e.timestamp) >= Date.now() - 86400000).length;
-    const role = { admin: users.filter(u => String(u.email || '').trim().toLowerCase() === env.ADMIN_EMAIL.trim().toLowerCase()).length, user: 0 };
-    role.user = Math.max(0, totalUsers - role.admin);
-    await recordAudit(env, { action: 'ADMIN_OVERVIEW_VIEW', status: 'SUCCESS', userId: admin.userId, email: admin.email, metadata: { days } });
-    return jsonResponse({ success: true, generatedAt: new Date().toISOString(), rangeDays: days, summary: { totalUsers, activeUsers30d, newUsers7d, registrationsToday, login24h, failedLogin24h: failed24h, roles: role }, series: buckets, audit: { totalLoginSuccess: loginSuccess.length, totalLoginFailed: failedLogin.length } }, 200, corsHeaders);
-  } catch (error) { console.error('Admin overview error:', error); return jsonResponse({ error: 'Failed to build admin overview' }, 500, corsHeaders); }
-}
-
-async function handleAdminAudit(request, env, corsHeaders) {
-  try {
-    const admin = await requireAdmin(request, env);
-    if (!admin.ok) return jsonResponse({ error: admin.error }, admin.status, corsHeaders);
-    const url = new URL(request.url);
-    const page = parsePositiveInt(url.searchParams.get('page'), 1, 1000000);
-    const pageSize = parsePositiveInt(url.searchParams.get('pageSize'), 25, MAX_AUDIT_PAGE_SIZE);
-    const action = String(url.searchParams.get('action') || 'all').trim().toUpperCase();
-    const status = String(url.searchParams.get('status') || 'all').trim().toUpperCase();
-    const q = String(url.searchParams.get('q') || '').trim().toLowerCase().slice(0, 100);
-    const from = Date.parse(url.searchParams.get('from') || '') || 0;
-    const toRaw = Date.parse(url.searchParams.get('to') || '');
-    const to = toRaw ? toRaw + 86400000 - 1 : Number.POSITIVE_INFINITY;
-    let events = await getAuditEvents(env, 5000);
-    if (action !== 'ALL') events = events.filter(e => e.action === action);
-    if (status !== 'ALL') events = events.filter(e => e.status === status);
-    if (q) events = events.filter(e => `${e.email || ''} ${e.userId || ''} ${e.action || ''} ${e.metadata?.reason || ''}`.toLowerCase().includes(q));
-    events = events.filter(e => { const t = Date.parse(e.timestamp || ''); return Number.isFinite(t) && t >= from && t <= to; });
-    const total = events.length;
-    const pages = Math.max(1, Math.ceil(total / pageSize));
-    const safePage = Math.min(page, pages);
-    const start = (safePage - 1) * pageSize;
-    const items = events.slice(start, start + pageSize).map(e => ({ id: e.id, timestamp: e.timestamp, action: e.action, status: e.status, userId: e.userId || null, email: e.email || null, metadata: e.metadata || {} }));
-    await recordAudit(env, { action: 'ADMIN_AUDIT_VIEW', status: 'SUCCESS', userId: admin.userId, email: admin.email, metadata: { page: safePage, pageSize, action, status } });
-    return jsonResponse({ success: true, page: safePage, pageSize, total, totalPages: pages, events: items }, 200, corsHeaders);
-  } catch (error) { console.error('Admin audit error:', error); return jsonResponse({ error: 'Failed to get audit log' }, 500, corsHeaders); }
-}
-
-async function recordAudit(env, event) {
-  try {
-    const kv = env.PEMBUKUAN_KV;
-    if (!kv) return false;
-    const timestamp = new Date().toISOString();
-    const id = generateId();
-    const safe = {
-      id,
-      timestamp,
-      action: String(event.action || 'UNKNOWN').slice(0, 60),
-      status: String(event.status || 'SUCCESS').slice(0, 40),
-      userId: typeof event.userId === 'string' ? event.userId.slice(0, MAX_USER_ID_LENGTH) : undefined,
-      email: typeof event.email === 'string' ? event.email.trim().toLowerCase().slice(0, 254) : undefined,
-      metadata: sanitizeAuditMetadata(event.metadata)
-    };
-    Object.keys(safe).forEach(key => safe[key] === undefined && delete safe[key]);
-    const reverseTime = String(9999999999999 - Date.now()).padStart(13, '0');
-    await kv.put(`${AUDIT_PREFIX}${reverseTime}:${id}`, JSON.stringify(safe), { expirationTtl: AUDIT_RETENTION_SECONDS });
-    return true;
-  } catch (error) { console.error('Audit write error:', error); return false; }
-}
-function sanitizeAuditMetadata(metadata) {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
-  const safe = {};
-  for (const [key, value] of Object.entries(metadata).slice(0, 10)) {
-    if (typeof value === 'string') safe[String(key).slice(0, 40)] = value.slice(0, 200);
-    else if (typeof value === 'number' || typeof value === 'boolean') safe[String(key).slice(0, 40)] = value;
-  }
-  return safe;
-}
-
-async function handleSaveTransactions(request, env, corsHeaders) {
-  try { const body = await request.json(); const { userId, transactions } = body || {};
-    if (typeof userId !== 'string' || !userId.trim() || userId.length > MAX_USER_ID_LENGTH || !Array.isArray(transactions)) return jsonResponse({ error: 'Invalid userId or transactions' }, 400, corsHeaders);
-    if (transactions.length > MAX_TRANSACTIONS_PER_SYNC) return jsonResponse({ error: `Maximum ${MAX_TRANSACTIONS_PER_SYNC} transactions per sync` }, 400, corsHeaders);
-    const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: token does not match user' }, 403, corsHeaders);
-    const now = new Date().toISOString(); const incomingIds = new Set();
-    for (const transaction of transactions) { const validation = validateTransaction(transaction, now); if (!validation.valid) return jsonResponse({ error: validation.error }, 400, corsHeaders); if (incomingIds.has(transaction.id)) return jsonResponse({ error: `Duplicate transaction ID in sync: ${transaction.id}` }, 400, corsHeaders); incomingIds.add(transaction.id); }
-    const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); let saved = 0; let skippedDeleted = 0;
-    for (const transaction of transactions) { if (deletedIds.has(transaction.id)) { skippedDeleted += 1; continue; } const key = transactionKey(userId, transaction.id); const existingRaw = await env.PEMBUKUAN_KV.get(key); let shouldWrite = true; if (existingRaw) { try { const existing = JSON.parse(existingRaw); shouldWrite = getTimestamp(transaction) > getTimestamp(existing); } catch { shouldWrite = false; } } if (!shouldWrite) continue; await env.PEMBUKUAN_KV.put(key, JSON.stringify(transaction)); saved += 1; const tombstone = await env.PEMBUKUAN_KV.get(`${DELETED_PREFIX}${userId}:${transaction.id}`); if (tombstone) { await env.PEMBUKUAN_KV.delete(key); skippedDeleted += 1; } }
-    const result = await listTransactions(userId, env, deletedIds);
-    if (saved > 0) { const raw = await env.PEMBUKUAN_KV.get(`user:${userId}`); let email = ''; try { email = raw ? JSON.parse(raw).email || '' : ''; } catch {} await recordAudit(env, { action: 'TRANSACTIONS_SYNC', status: 'SUCCESS', userId, email, metadata: { saved, skippedDeleted } }); }
-    return jsonResponse({ success: true, message: 'Transactions synchronized successfully', count: result.length, saved, skippedDeleted, transactions: result, deletedIds: Array.from(deletedIds) }, 200, corsHeaders);
-  } catch (error) { console.error('Save transactions error:', error); return jsonResponse({ error: 'Failed to save transactions' }, 500, corsHeaders); }
-}
-
-function validateTransaction(transaction, fallbackTimestamp) {
-  if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) return { valid: false, error: 'Invalid transaction object' };
-  if (typeof transaction.id !== 'string' || transaction.id.length < 1 || transaction.id.length > MAX_TRANSACTION_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(transaction.id)) return { valid: false, error: 'Invalid transaction ID' };
-  if (transaction.type !== 'income' && transaction.type !== 'expense') return { valid: false, error: 'Transaction type must be income or expense' };
-  if (typeof transaction.category !== 'string' || transaction.category.trim().length < 1 || transaction.category.length > MAX_CATEGORY_LENGTH) return { valid: false, error: 'Invalid transaction category' };
-  if (typeof transaction.amount !== 'number' || !Number.isFinite(transaction.amount) || transaction.amount <= 0 || transaction.amount > MAX_TRANSACTION_AMOUNT) return { valid: false, error: 'Transaction amount must be a valid positive number' };
-  if (typeof transaction.date !== 'string' || !isValidDateOnly(transaction.date)) return { valid: false, error: 'Transaction date must be a valid YYYY-MM-DD date' };
-  if (transaction.description !== undefined && transaction.description !== null && (typeof transaction.description !== 'string' || transaction.description.length > MAX_DESCRIPTION_LENGTH)) return { valid: false, error: 'Invalid transaction description' };
-  for (const field of ['createdAt', 'updatedAt']) { if (transaction[field] !== undefined) { if (typeof transaction[field] !== 'string') return { valid: false, error: `Invalid transaction ${field}` }; const parsed = Date.parse(transaction[field]); if (!Number.isFinite(parsed)) return { valid: false, error: `Invalid transaction ${field}` }; if (parsed > Date.now() + MAX_CLIENT_FUTURE_SKEW_MS) return { valid: false, error: `Transaction ${field} cannot be far in the future` }; } }
-  return { valid: true };
-}
-function isValidDateOnly(value) { if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false; const date = new Date(`${value}T00:00:00Z`); return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value; }
-function transactionKey(userId, transactionId) { return `${TX_PREFIX}${userId}:${transactionId}`; }
-async function listTransactions(userId, env, deletedIds = new Set()) { const transactions = []; let cursor; do { const page = await env.PEMBUKUAN_KV.list({ prefix: `${TX_PREFIX}${userId}:`, cursor }); for (const key of page.keys) { if (deletedIds.has(key.name.slice(`${TX_PREFIX}${userId}:`.length))) continue; const raw = await env.PEMBUKUAN_KV.get(key.name); if (!raw) continue; try { const transaction = JSON.parse(raw); if (validateTransaction(transaction, new Date().toISOString()).valid) transactions.push(transaction); } catch {} } cursor = page.list_complete ? undefined : page.cursor; } while (cursor); transactions.sort((a, b) => { const dateDiff = new Date(b.date) - new Date(a.date); return dateDiff || getTimestamp(b) - getTimestamp(a); }); return transactions; }
-async function migrateLegacyTransactions(userId, env, deletedIds = new Set()) { const key = `${LEGACY_TRANSACTIONS_PREFIX}${userId}`; const raw = await env.PEMBUKUAN_KV.get(key); if (!raw) return; try { const legacy = JSON.parse(raw); if (!Array.isArray(legacy)) return; for (const transaction of legacy) { if (!validateTransaction(transaction, new Date().toISOString()).valid || deletedIds.has(transaction.id)) continue; const target = transactionKey(userId, transaction.id); if (!(await env.PEMBUKUAN_KV.get(target))) await env.PEMBUKUAN_KV.put(target, JSON.stringify(transaction)); } await env.PEMBUKUAN_KV.delete(key); } catch {} }
-async function handleGetTransactions(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized: cannot access other user data' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); return jsonResponse({ success: true, userId, transactions, count: transactions.length, deletedIds: Array.from(deletedIds) }, 200, corsHeaders); } catch (error) { console.error('Get transactions error:', error); return jsonResponse({ error: 'Failed to get transactions' }, 500, corsHeaders); } }
-async function handleDeleteTransaction(userId, transactionId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); if (typeof transactionId !== 'string' || transactionId.length < 1 || transactionId.length > MAX_TRANSACTION_ID_LENGTH || !/^[A-Za-z0-9_-]+$/.test(transactionId)) return jsonResponse({ error: 'Invalid transaction ID' }, 400, corsHeaders); const deletedAt = new Date().toISOString(); await env.PEMBUKUAN_KV.put(`${DELETED_PREFIX}${userId}:${transactionId}`, JSON.stringify({ transactionId, deletedAt })); await env.PEMBUKUAN_KV.delete(transactionKey(userId, transactionId)); await env.PEMBUKUAN_KV.delete(`${LEGACY_TRANSACTIONS_PREFIX}${userId}`); const raw = await env.PEMBUKUAN_KV.get(`user:${userId}`); let email = ''; try { email = raw ? JSON.parse(raw).email || '' : ''; } catch {} await recordAudit(env, { action: 'TRANSACTION_DELETE', status: 'SUCCESS', userId, email, metadata: { transactionId } }); return jsonResponse({ success: true, message: 'Transaction deleted', transactionId, deletedAt }, 200, corsHeaders); } catch (error) { console.error('Delete transaction error:', error); return jsonResponse({ error: 'Failed to delete transaction' }, 500, corsHeaders); } }
-async function getDeletedIds(userId, env) { const ids = []; let cursor; do { const page = await env.PEMBUKUAN_KV.list({ prefix: `${DELETED_PREFIX}${userId}:`, cursor }); for (const key of page.keys) ids.push(key.name.slice(`${DELETED_PREFIX}${userId}:`.length)); cursor = page.list_complete ? undefined : page.cursor; } while (cursor); return ids; }
-async function handleGetStats(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0); const expense = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0); const stats = { totalIncome: income, totalExpense: expense, balance: income - expense, transactionCount: transactions.length }; return jsonResponse({ success: true, userId, stats, ...stats }, 200, corsHeaders); } catch (error) { console.error('Stats error:', error); return jsonResponse({ error: 'Failed to get stats' }, 500, corsHeaders); } }
-async function handleExport(userId, request, env, corsHeaders) { try { const tokenOwner = await requireOwner(request, env); if (!tokenOwner) return jsonResponse({ error: 'Invalid or expired token' }, 401, corsHeaders); if (tokenOwner !== userId) return jsonResponse({ error: 'Unauthorized' }, 403, corsHeaders); const deletedIds = new Set(await getDeletedIds(userId, env)); await migrateLegacyTransactions(userId, env, deletedIds); const transactions = await listTransactions(userId, env, deletedIds); return jsonResponse({ success: true, userId, transactions, count: transactions.length }, 200, corsHeaders); } catch (error) { console.error('Export error:', error); return jsonResponse({ error: 'Failed to export data' }, 500, corsHeaders); } }
-async function createSession(kv, token, userId) { await kv.put(`session:${token}`, JSON.stringify({ userId, createdAt: new Date().toISOString() }), { expirationTtl: SESSION_TTL_SECONDS }); }
-async function getTokenOwner(token, kv) { if (!token || !kv) return null; const raw = await kv.get(`session:${token}`); if (!raw) return null; try { const session = JSON.parse(raw); return typeof session.userId === 'string' ? session.userId : null; } catch { return null; } }
-function requireOwner(request, env) { return getTokenOwner(getAuthToken(request), env.PEMBUKUAN_KV); }
-function getAuthToken(request) { const authHeader = request.headers.get('Authorization') || ''; if (authHeader.startsWith('Bearer ')) return authHeader.slice(7).trim(); return getCookie(request, SESSION_COOKIE); }
-async function hashPassword(password) { const saltBytes = crypto.getRandomValues(new Uint8Array(16)); const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256); return { hash: bytesToBase64(new Uint8Array(bits)), salt: bytesToBase64(saltBytes) }; }
-async function verifyPassword(password, encodedHash, encodedSalt) { try { const salt = base64ToBytes(encodedSalt); const expected = base64ToBytes(encodedHash); const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']); const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: PASSWORD_ITERATIONS, hash: 'SHA-256' }, key, 256); return constantTimeEqual(new Uint8Array(bits), expected); } catch { return false; } }
-function constantTimeEqual(a, b) { if (a.length !== b.length) return false; let result = 0; for (let i = 0; i < a.length; i++) result |= a[i] ^ b[i]; return result === 0; }
-function encodeLegacyPassword(password) { return btoa(unescape(encodeURIComponent(password + LEGACY_PASSWORD_SUFFIX))); }
-function bytesToBase64(bytes) { let binary = ''; const chunk = 0x8000; for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk)); return btoa(binary); }
-function base64ToBytes(value) { const binary = atob(value); const bytes = new Uint8Array(binary.length); for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return bytes; }
-function getTimestamp(transaction) { const value = transaction && (transaction.updatedAt || transaction.createdAt); const timestamp = value ? Date.parse(value) : 0; return Number.isFinite(timestamp) ? timestamp : 0; }
-function getCorsHeaders(request, env) { const requestOrigin = request.headers.get('Origin'); const allowedOrigins = getAllowedOrigins(env); const headers = { 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Max-Age': '86400', 'Content-Type': 'application/json', 'Vary': 'Origin', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin', 'Content-Security-Policy': "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://pembukuan-app.viqiquotex.workers.dev; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';", 'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=()' }; if (requestOrigin && allowedOrigins.includes(requestOrigin)) headers['Access-Control-Allow-Origin'] = requestOrigin; return headers; }
-function withCookie(headers, cookie) { return cookie ? { ...headers, 'Set-Cookie': cookie } : headers; }
-function buildSessionCookie(token) { return `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=${SESSION_TTL_SECONDS}`; }
-function clearSessionCookie() { return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=None; Path=/; Max-Age=0`; }
-function getCookie(request, name) { const header = request.headers.get('Cookie') || ''; for (const part of header.split(';')) { const index = part.indexOf('='); if (index === -1) continue; const key = part.slice(0, index).trim(); const value = part.slice(index + 1).trim(); if (key === name) { try { return decodeURIComponent(value); } catch { return null; } } } return null; }
-function generateId() { return crypto.randomUUID(); }
-function generateToken() { return crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, ''); }
-function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()); }
-function jsonResponse(data, status = 200, headers = {}) { return new Response(JSON.stringify(data), { status, headers }); }
+async function handleAdminOverviewLegacy(){}function getTimestamp(t){const v=t&&(t.updatedAt||t.createdAt),x=v?Date.parse(v):0;return Number.isFinite(x)?x:0}async function hashPassword(p){const salt=crypto.getRandomValues(new Uint8Array(16)),key=await crypto.subtle.importKey('raw',new TextEncoder().encode(p),'PBKDF2',false,['deriveBits']),bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:PASSWORD_ITERATIONS,hash:'SHA-256'},key,256);return{hash:bytesToBase64(new Uint8Array(bits)),salt:bytesToBase64(salt)}}async function verifyPassword(p,h,s){try{const salt=base64ToBytes(s),expected=base64ToBytes(h),key=await crypto.subtle.importKey('raw',new TextEncoder().encode(p),'PBKDF2',false,['deriveBits']),bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:PASSWORD_ITERATIONS,hash:'SHA-256'},key,256);return constantTimeEqual(new Uint8Array(bits),expected)}catch{return false}}function constantTimeEqual(a,b){if(a.length!==b.length)return false;let r=0;for(let i=0;i<a.length;i++)r|=a[i]^b[i];return r===0}function encodeLegacyPassword(p){return btoa(unescape(encodeURIComponent(p+LEGACY_PASSWORD_SUFFIX)))}function bytesToBase64(b){let s='';for(let i=0;i<b.length;i+=32768)s+=String.fromCharCode(...b.subarray(i,i+32768));return btoa(s)}function base64ToBytes(v){const s=atob(v),b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b}function generateId(){return crypto.randomUUID()}function generateToken(){return crypto.randomUUID().replace(/-/g,'')+crypto.randomUUID().replace(/-/g,'')}function isValidEmail(e){return/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())}function jsonResponse(d,s=200,h={}){return new Response(JSON.stringify(d),{status:s,headers:h})}
