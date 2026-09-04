@@ -1,0 +1,42 @@
+/* =========================================================
+   NEXA HOME — FIRST SCREEN POLISH
+   Visual-only layer. Application functions remain unchanged.
+   ========================================================= */
+
+.home-hub{max-width:900px;margin:0 auto;padding:4px 0 30px}
+.home-hero{text-align:center;padding:34px 18px 30px}
+.home-hero .hero-logo{width:64px;height:64px;margin:0 auto 17px;border-radius:20px;display:grid;place-items:center;font-size:27px;font-weight:800;background:linear-gradient(145deg,#8586ff 0%,#5354db 52%,#4445c5 100%);color:#fff;box-shadow:0 14px 30px rgba(91,92,226,.26)}
+.home-hero .hero-eyebrow{display:inline-flex;align-items:center;gap:6px;margin-bottom:10px;padding:6px 10px;border-radius:999px;background:rgba(91,92,226,.08);color:var(--nexa-primary);font-size:9px;font-weight:800;letter-spacing:1.3px;text-transform:uppercase}
+.home-hero h2{margin:0;font-size:clamp(27px,4vw,36px);line-height:1.12;letter-spacing:-1px}
+.home-hero p{max-width:520px;margin:11px auto 0;opacity:.65;font-size:14px;line-height:1.55}
+.home-auth-note{display:inline-flex;align-items:center;gap:7px;margin-top:16px;padding:8px 12px;border:1px solid rgba(91,92,226,.12);border-radius:999px;background:rgba(255,255,255,.7);color:#666a7b;font-size:11px}
+.hub-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.hub-card{position:relative;display:flex;flex-direction:column;width:100%;min-height:255px;border:1px solid rgba(127,127,127,.14);border-radius:22px;padding:25px;text-align:left;background:rgba(255,255,255,.9);box-shadow:0 12px 32px rgba(37,39,75,.07);cursor:pointer;transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;overflow:hidden}
+.hub-card::after{content:"";position:absolute;width:150px;height:150px;right:-75px;top:-75px;border-radius:50%;background:radial-gradient(circle,rgba(123,111,246,.12),transparent 68%);pointer-events:none}
+.hub-card:hover{transform:translateY(-3px);box-shadow:0 18px 40px rgba(37,39,75,.11);border-color:rgba(91,92,226,.2)}
+.hub-card:active{transform:scale(.99)}
+.hub-icon{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;font-size:25px;background:rgba(91,92,226,.08);margin-bottom:18px}
+.hub-card h3{margin:0;font-size:23px;letter-spacing:-.4px}
+.hub-card p{margin:8px 0 16px;font-size:13px;line-height:1.55;opacity:.65;max-width:350px}
+.hub-features{display:flex;flex-wrap:wrap;gap:7px}
+.hub-feature{font-size:10px;font-weight:700;padding:6px 9px;border-radius:999px;background:#f3f3fa;opacity:.82}
+.hub-arrow{margin-top:auto;padding-top:20px;font-size:12px;font-weight:800;color:var(--nexa-primary)}
+.hub-card.kasir-highlight{border-width:2px;border-color:rgba(91,92,226,.18)}
+.hub-card.pembukuan-highlight{border-width:2px;border-color:rgba(91,92,226,.12)}
+.hub-card[aria-disabled="true"]{opacity:.78}
+.hub-card[aria-disabled="true"] .hub-icon{filter:grayscale(.25)}
+.hub-note{text-align:center;margin:20px 10px 0;font-size:11px;opacity:.55}
+.home-hub+.home-footer-note{display:none}
+
+@media(max-width:700px){
+  .home-hub{padding-top:0}
+  .home-hero{padding:23px 8px 24px}
+  .home-hero .hero-logo{width:56px;height:56px;border-radius:17px;font-size:24px;margin-bottom:14px}
+  .home-hero h2{font-size:27px}
+  .home-hero p{font-size:13px}
+  .home-auth-note{font-size:10px}
+  .hub-grid{grid-template-columns:1fr;gap:12px}
+  .hub-card{min-height:0;padding:20px;border-radius:18px}
+  .hub-card p{max-width:none}
+  .hub-arrow{padding-top:16px}
+}
