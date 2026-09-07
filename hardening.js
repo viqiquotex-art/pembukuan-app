@@ -19,6 +19,10 @@
   const TOKEN_KEY = 'cloud_token';
   const PROTECTED_TABS = new Set(['kasir', 'input', 'history', 'recap']);
   const AUTH_PAGE = './cloud.html';
+  const ADMIN_CONFIG_ENDPOINT = 'https://pembukuan-app.viqiquotex.workers.dev/api/admin/config-status';
+
+  let adminAuthorized = false;
+  let adminCheckInFlight = null;
 
   const nativeGetItem = Storage.prototype.getItem;
   const nativeSetItem = Storage.prototype.setItem;
@@ -98,6 +102,49 @@
     });
   }
 
+  function updateAdminNavigation() {
+    const button = document.getElementById('adminTabBtn');
+    if (button) {
+      button.style.display = adminAuthorized ? '' : 'none';
+      button.setAttribute('aria-hidden', adminAuthorized ? 'false' : 'true');
+      button.setAttribute('aria-disabled', adminAuthorized ? 'false' : 'true');
+      if (!adminAuthorized && document.getElementById('admin')?.classList.contains('active')) {
+        if (typeof window.switchTab === 'function') window.switchTab('home');
+      }
+    }
+  }
+
+  function adminAuthFetch(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    try {
+      const token = nativeGetItem.call(window.sessionStorage, TOKEN_KEY);
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+    } catch (_) {}
+    return fetch(url, { ...options, headers, credentials: 'include' });
+  }
+
+  async function verifyAdminAccess() {
+    if (!isAuthenticated()) {
+      adminAuthorized = false;
+      updateAdminNavigation();
+      return false;
+    }
+    if (adminCheckInFlight) return adminCheckInFlight;
+    adminCheckInFlight = (async () => {
+      try {
+        const response = await adminAuthFetch(ADMIN_CONFIG_ENDPOINT, { method: 'GET', headers: { Accept: 'application/json' } });
+        adminAuthorized = response.ok;
+      } catch (_) {
+        adminAuthorized = false;
+      } finally {
+        updateAdminNavigation();
+        adminCheckInFlight = null;
+      }
+      return adminAuthorized;
+    })();
+    return adminCheckInFlight;
+  }
+
   function installNavigationCompatibility() {
     const originalSwitchTab = window.switchTab;
     if (typeof originalSwitchTab !== 'function' || window.__NEXA_NAV_HARDENED__) return;
@@ -109,6 +156,14 @@
         const content = document.getElementById(tabName), button = document.querySelector(`.tab-btn[data-tab="${CSS.escape(tabName)}"]`);
         if (content) content.classList.add('active'); if (button) button.classList.add('active');
         updateProtectedNavigation();
+        updateAdminNavigation();
+        return;
+      }
+      if (tabName === 'admin' && !adminAuthorized) {
+        verifyAdminAccess().then(ok => {
+          if (ok && typeof window.switchTab === 'function') window.switchTab('admin');
+          else if (typeof window.showToast === 'function') window.showToast('🔒 Akses Admin ditolak. Gunakan akun administrator.', 'error');
+        });
         return;
       }
       if (PROTECTED_TABS.has(tabName) && !isAuthenticated()) {
@@ -146,10 +201,10 @@
     installNavigationCompatibility();
     clearStaleCartOnUserChange();
     updateProtectedNavigation();
+    updateAdminNavigation();
     injectHomePolish();
     if (typeof window.updateCloudStatus === 'function') window.updateCloudStatus();
-    // index.html loads kasir.js immediately after this file. Load the bridge
-    // on the next task so the bridge can safely wrap the already-installed POS.
+    verifyAdminAccess();
     setTimeout(() => {
       if (window.__NEXA_KASIR_CLOUD_BRIDGE__) return;
       const script = document.createElement('script');
@@ -165,5 +220,6 @@
     setTimeout(installRuntimeHardening, 0);
   }
 
-  window.NEXA_DATA_ISOLATION = Object.freeze({ version: 3, getCurrentUserId: currentUserId, getTransactionStorageKey: scopedTransactionKey });
+  window.isAdminAuthorized = () => adminAuthorized;
+  window.NEXA_DATA_ISOLATION = Object.freeze({ version: 3, getCurrentUserId: currentUserId, getTransactionStorageKey: scopedTransactionKey, verifyAdminAccess });
 })();
