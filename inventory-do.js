@@ -46,11 +46,13 @@ export class InventoryDO {
         } catch {}
       });
 
-      await this.state.storage.transaction(async txn => {
-        for (const p of products) await txn.put(`product:${p.id}`, p);
-        await txn.put('userId', requestedUserId);
-        await txn.put('initialized', true);
-      });
+      // Initialization only runs once. Use the Durable Object's normal
+      // storage API here for broad runtime compatibility; checkout itself
+      // remains transactional below.
+      const writes = products.map(p => this.state.storage.put(`product:${p.id}`, p));
+      writes.push(this.state.storage.put('userId', requestedUserId));
+      writes.push(this.state.storage.put('initialized', true));
+      await Promise.all(writes);
     })();
     return this.ready;
   }
@@ -107,8 +109,6 @@ export class InventoryDO {
           quantities.set(item.productId, total);
         }
 
-        // Use a storage transaction as well as the DO's request serialization.
-        // Validation and all stock writes therefore commit or roll back together.
         let updated;
         try {
           updated = await this.state.storage.transaction(async txn => {
