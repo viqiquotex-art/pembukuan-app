@@ -85,7 +85,13 @@ async function handleLogin(event) {
   if (!email || !password) return showAlert('❌ Email dan password harus diisi!', 'error');
   try { setLoading(true, 'Logging in...'); const response = await authFetch(API_ENDPOINTS.login, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ email, password }) }); const data = await safeJson(response); if (!response.ok) { showAlert(`❌ ${data.error || 'Login gagal'}`, 'error'); return; } saveCloudCredentials({ userId: data.userId, name: data.name, email: data.email, token: data.token }); showAlert(`✅ Login berhasil! Selamat datang, ${data.name}`, 'success'); setTimeout(() => { window.location.href = './index.html'; }, 800); } catch (error) { console.error('Login error:', error); showAlert(`❌ Login gagal: ${error.message}`, 'error'); } finally { setLoading(false); }
 }
-async function handleLogout() { if (!confirm('Yakin logout? Data lokal tetap aman.')) return; try { await authFetch(API_ENDPOINTS.logout, { method: 'POST' }); } catch {} finally { clearCloudCredentials(); location.reload(); } }
+async function handleLogout() {
+  const ok = typeof nexaConfirm === 'function'
+    ? await nexaConfirm('Data lokal tetap aman di perangkat ini.', { title: 'Logout dari Cloud?', confirmText: 'Ya, Logout' })
+    : confirm('Yakin logout? Data lokal tetap aman.');
+  if (!ok) return;
+  try { await authFetch(API_ENDPOINTS.logout, { method: 'POST' }); } catch {} finally { clearCloudCredentials(); location.reload(); }
+}
 let cloudSyncInFlight = null;
 async function syncToCloud() {
   if (!isCloudConnected()) return showAlert('❌ Anda harus login terlebih dahulu', 'error');
