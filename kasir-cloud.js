@@ -102,7 +102,7 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     event.__nexaCloudHandled = true;
-    const form = event.currentTarget;
+    const form = event.target && event.target.id === 'kasirProductForm' ? event.target : document.getElementById('kasirProductForm');
     const name = document.getElementById('kasirProductName')?.value.trim();
     const price = Number((document.getElementById('kasirProductPrice')?.value || '').replace(/\D/g, ''));
     const stock = Number((document.getElementById('kasirProductStock')?.value || '').replace(/\D/g, ''));
@@ -130,7 +130,11 @@
     const id = button.dataset.id;
     const products = JSON.parse(localStorage.getItem(localKey()) || '[]');
     const product = Array.isArray(products) ? products.find(p => p.id === id) : null;
-    if (!product || !confirm(`Hapus produk "${product.name}"?`)) return;
+    if (!product) return;
+    const ok = typeof nexaConfirm === 'function'
+      ? await nexaConfirm(`Produk "${product.name}" akan dihapus dari cloud dan perangkat ini.`, { title: 'Hapus produk?', confirmText: 'Ya, Hapus', danger: true })
+      : confirm(`Hapus produk "${product.name}"?`);
+    if (!ok) return;
     try {
       await deleteProduct(id);
       await pullProducts();

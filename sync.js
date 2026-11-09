@@ -100,7 +100,10 @@
   }
 
   async function deleteTransaction(id) {
-    if (!confirm('Yakin hapus transaksi ini?')) return;
+    const ok = typeof nexaConfirm === 'function'
+      ? await nexaConfirm('Transaksi yang dihapus tidak dapat dikembalikan.', { title: 'Hapus transaksi ini?', confirmText: 'Ya, Hapus', danger: true })
+      : confirm('Yakin hapus transaksi ini?');
+    if (!ok) return;
 
     const credentials = getActiveCredentials();
     const transactions = typeof getTransactions === 'function' ? getTransactions() : [];

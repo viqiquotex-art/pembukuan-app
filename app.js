@@ -307,6 +307,59 @@ function showToast(message, type = 'info') {
   setTimeout(() => toast.classList.add('show'), 10); setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
+// ==========================================
+// Styled confirm dialog (replaces native confirm())
+// Usage: const ok = await nexaConfirm('Hapus data ini?', { danger: true });
+// ==========================================
+function injectNexaConfirmStyles() {
+  if (document.getElementById('nexaConfirmStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'nexaConfirmStyles';
+  style.textContent = `
+    .nexa-confirm-overlay{position:fixed;inset:0;background:rgba(17,19,30,.45);display:flex;align-items:flex-end;justify-content:center;z-index:10050;opacity:0;transition:opacity .18s ease;backdrop-filter:blur(2px)}
+    .nexa-confirm-overlay.show{opacity:1}
+    .nexa-confirm-box{width:min(420px,100%);background:var(--surface,#fff);border-radius:22px 22px 0 0;padding:26px 22px 22px;box-shadow:0 -10px 40px rgba(20,22,40,.18);transform:translateY(16px);transition:transform .2s ease}
+    .nexa-confirm-overlay.show .nexa-confirm-box{transform:translateY(0)}
+    .nexa-confirm-icon{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:21px;margin-bottom:14px;background:rgba(91,92,226,.1)}
+    .nexa-confirm-box.danger .nexa-confirm-icon{background:rgba(239,68,68,.1)}
+    .nexa-confirm-box h4{margin:0 0 6px;font-size:17px;letter-spacing:-.2px}
+    .nexa-confirm-box p{margin:0;font-size:13px;color:var(--text-secondary,#5e6270);line-height:1.5}
+    .nexa-confirm-actions{display:flex;gap:10px;margin-top:22px}
+    .nexa-confirm-actions button{flex:1;min-height:46px;border-radius:12px;border:0;font-weight:700;font-size:13.5px;cursor:pointer;transition:transform .12s ease,opacity .12s ease}
+    .nexa-confirm-actions button:active{transform:scale(.98)}
+    .nexa-confirm-cancel{background:var(--surface-soft,#f5f5fa);color:var(--text,#191b24);border:1px solid var(--border,#e7e8ef) !important}
+    .nexa-confirm-ok{background:var(--primary,#5b5ce2);color:#fff}
+    .nexa-confirm-box.danger .nexa-confirm-ok{background:var(--danger,#df4f5f)}
+    @media(min-width:560px){.nexa-confirm-overlay{align-items:center}.nexa-confirm-box{border-radius:22px}}
+    @media(prefers-reduced-motion:reduce){.nexa-confirm-overlay,.nexa-confirm-box{transition:none}}
+  `;
+  document.head.appendChild(style);
+}
+
+function nexaConfirm(message, options = {}) {
+  injectNexaConfirmStyles();
+  const { title = 'Konfirmasi', confirmText = 'Ya, Lanjutkan', cancelText = 'Batal', danger = false, icon = danger ? '⚠️' : '❓' } = options;
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'nexa-confirm-overlay';
+    overlay.innerHTML = `<div class="nexa-confirm-box${danger ? ' danger' : ''}"><div class="nexa-confirm-icon">${icon}</div><h4>${escapeHtml(title)}</h4><p>${escapeHtml(message)}</p><div class="nexa-confirm-actions"><button type="button" class="nexa-confirm-cancel">${escapeHtml(cancelText)}</button><button type="button" class="nexa-confirm-ok">${escapeHtml(confirmText)}</button></div></div>`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('show'));
+    const finish = result => {
+      overlay.classList.remove('show');
+      setTimeout(() => overlay.remove(), 180);
+      resolve(result);
+    };
+    overlay.querySelector('.nexa-confirm-ok').addEventListener('click', () => finish(true));
+    overlay.querySelector('.nexa-confirm-cancel').addEventListener('click', () => finish(false));
+    overlay.addEventListener('click', e => { if (e.target === overlay) finish(false); });
+    document.addEventListener('keydown', function onKey(e) {
+      if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); finish(false); }
+    });
+  });
+}
+window.nexaConfirm = nexaConfirm;
+
 window.addEventListener('DOMContentLoaded', () => {
   setTodayDate(); updateCategories(); renderHistory(); renderRecap(); renderCloudPanel(); updateCloudStatus();
   const style = document.createElement('style');
