@@ -15,44 +15,64 @@ export class InventoryDO {
   async ensureLoaded(request) {
     if (this.ready) return this.ready;
     this.ready = (async () => {
-      const requestedUserId = request?.headers?.get('X-Inventory-User') || '';
-      if (!/^[A-Za-z0-9_-]{1,100}$/.test(requestedUserId)) {
-        throw new Error('Missing or invalid inventory user ID');
+      try {
+        const requestedUserId = request?.headers?.get('X-Inventory-User') || '';
+        if (!/^[A-Za-z0-9_-]{1,100}$/.test(requestedUserId)) {
+          throw new Error('Missing or invalid inventory user ID');
+        }
+
+        const storedUserId = await this.state.storage.get('userId');
+        if (storedUserId && storedUserId !== requestedUserId) {
+          throw new Error('Inventory user mismatch');
+        }
+
+        if (await this.state.storage.get('initialized')) {
+          if (!storedUserId) await this.state.storage.put('userId', requestedUserId);
+          return;
+        }
+
+        // Migrate legacy KV products exactly once. KV list() supports at most
+        // 1,000 keys per page, so use cursor pagination and enforce the app's
+        // existing 5,000-product migration ceiling across all pages.
+        const prefix = `product:${requestedUserId}:`;
+        const keys = [];
+        let cursor;
+        do {
+          const options = { prefix, limit: 999 };
+          if (cursor) options.cursor = cursor;
+          const page = await this.env.PEMBUKUAN_KV.list(options);
+          keys.push(...page.keys);
+          if (keys.length > 5000) {
+            throw new Error('Inventory migration exceeds supported 5000 product limit');
+          }
+          cursor = page.list_complete ? undefined : page.cursor;
+          if (!page.list_complete && !cursor) {
+            throw new Error('Inventory migration pagination cursor missing');
+          }
+        } while (cursor);
+
+        const products = [];
+        const values = await Promise.all(keys.map(k => this.env.PEMBUKUAN_KV.get(k.name)));
+        values.forEach(raw => {
+          if (!raw) return;
+          try {
+            const p = JSON.parse(raw);
+            if (validProduct(p)) products.push(p);
+          } catch {}
+        });
+
+        // Initialization only runs once. Use the Durable Object's normal
+        // storage API here for broad runtime compatibility; checkout itself
+        // remains transactional below.
+        const writes = products.map(p => this.state.storage.put(`product:${p.id}`, p));
+        writes.push(this.state.storage.put('userId', requestedUserId));
+        writes.push(this.state.storage.put('initialized', true));
+        await Promise.all(writes);
+      } catch (error) {
+        // A transient KV/DO failure must not permanently poison this instance.
+        this.ready = null;
+        throw error;
       }
-
-      const storedUserId = await this.state.storage.get('userId');
-      if (storedUserId && storedUserId !== requestedUserId) {
-        throw new Error('Inventory user mismatch');
-      }
-
-      if (await this.state.storage.get('initialized')) {
-        if (!storedUserId) await this.state.storage.put('userId', requestedUserId);
-        return;
-      }
-
-      // Migrate legacy KV products exactly once. The router maps one DO to
-      // one application user and forwards that user ID in a trusted header.
-      const prefix = `product:${requestedUserId}:`;
-      const page = await this.env.PEMBUKUAN_KV.list({ prefix, limit: 5000 });
-      if (!page.list_complete) throw new Error('Inventory migration exceeds supported KV page size');
-
-      const products = [];
-      const values = await Promise.all(page.keys.map(k => this.env.PEMBUKUAN_KV.get(k.name)));
-      values.forEach(raw => {
-        if (!raw) return;
-        try {
-          const p = JSON.parse(raw);
-          if (validProduct(p)) products.push(p);
-        } catch {}
-      });
-
-      // Initialization only runs once. Use the Durable Object's normal
-      // storage API here for broad runtime compatibility; checkout itself
-      // remains transactional below.
-      const writes = products.map(p => this.state.storage.put(`product:${p.id}`, p));
-      writes.push(this.state.storage.put('userId', requestedUserId));
-      writes.push(this.state.storage.put('initialized', true));
-      await Promise.all(writes);
     })();
     return this.ready;
   }
